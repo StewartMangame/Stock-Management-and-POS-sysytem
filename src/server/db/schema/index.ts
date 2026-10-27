@@ -3,3 +3,4 @@
  * Each phase adds its own file and re-exports here.
  */
 export * from './setup';
+export * from './stock';

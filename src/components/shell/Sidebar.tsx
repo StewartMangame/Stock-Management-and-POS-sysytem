@@ -50,9 +50,13 @@ const navGroups: NavItem[] = [
     children: [
       { label: 'Products', href: '/stock/products' },
       { label: 'Stock On Hand', href: '/stock/on-hand' },
+      { label: 'Stock Ledger', href: '/stock/movements' },
       { label: 'Adjustments', href: '/stock/adjustments' },
       { label: 'Stock Counts', href: '/stock/counts' },
       { label: 'Serial Numbers', href: '/stock/serials' },
+      { label: 'Categories', href: '/stock/categories' },
+      { label: 'Units of Measure', href: '/stock/units' },
+      { label: 'Import CSV', href: '/stock/products/import' },
     ],
   },
   {
