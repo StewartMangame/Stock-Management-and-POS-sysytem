@@ -6,6 +6,10 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '4mb',
     },
   },
+  // Keep native Node.js modules external — webpack must not bundle them.
+  // bufferutil / utf-8-validate: native ws addons; bundling them breaks WebSocket connections.
+  // @node-rs/argon2: uses WASM/native bindings incompatible with the edge/browser bundle.
+  serverExternalPackages: ['ws', 'bufferutil', 'utf-8-validate', '@node-rs/argon2'],
   images: {
     remotePatterns: [],
   },

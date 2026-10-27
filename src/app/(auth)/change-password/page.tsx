@@ -1,7 +1,7 @@
 'use client';
 
-import { useActionState, useTransition, useEffect } from 'react';
-import { useSession } from 'next-auth/react';
+import { useActionState, useEffect } from 'react';
+import { signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Loader2, Lock, ShieldCheck } from 'lucide-react';
@@ -14,20 +14,18 @@ import { changePasswordAction } from './actions';
 const initialState = { error: undefined, success: false };
 
 export default function ChangePasswordPage() {
-  const { update } = useSession();
   const router = useRouter();
   const [state, formAction, isPending] = useActionState(changePasswordAction, initialState);
 
   useEffect(() => {
     if (state.success) {
-      toast.success('Password changed successfully. Please sign in again.');
-      // Refresh the JWT so forcePasswordChange becomes false in the token
-      update().then(() => {
-        router.push('/dashboard');
-        router.refresh();
-      });
+      toast.success('Password changed! Please sign in with your new password.');
+      // Sign out so the old JWT (with forcePasswordChange=true) is cleared,
+      // then send to login. The user re-authenticates with their new password.
+      signOut({ callbackUrl: '/login' });
     }
-  }, [state.success, update, router]);
+  }, [state.success, router]);
+
 
   return (
     <Card className="w-full max-w-md shadow-lg">
