@@ -38,11 +38,21 @@ import {
   RotateCcw,
   FileCheck,
   Lock,
+  CreditCard,
 } from 'lucide-react';
 import { issueInvoiceAction, voidInvoiceAction } from '../actions';
 
 interface InvoiceDetailProps {
   invoice: {
+    allocations?: Array<{
+      id: string;
+      paymentId: string;
+      amountMinor: number;
+      allocatedAt: string;
+      paymentNumber: string;
+      paymentMethod: string;
+      paymentStatus: string;
+    }>;
     id: string;
     documentNumber: string | null;
     status: 'draft' | 'issued' | 'void';
@@ -293,6 +303,14 @@ export function InvoiceDetailClient({ invoice: inv }: InvoiceDetailProps) {
                   <RotateCcw className="h-4 w-4" /> Issue Credit Note
                 </Link>
               </Button>
+
+              {inv.balanceMinor > 0 && (
+                <Button asChild size="sm" className="h-9 gap-1.5 bg-emerald-600 text-white hover:bg-emerald-700 font-semibold shadow-sm">
+                  <Link href={`/sales/payments/new?customerId=${inv.customer.id}&invoiceId=${inv.id}`}>
+                    <CreditCard className="h-4 w-4" /> Record Payment
+                  </Link>
+                </Button>
+              )}
 
               {inv.deliveryStatus === 'not_delivered' && (
                 <Button
@@ -569,6 +587,72 @@ export function InvoiceDetailClient({ invoice: inv }: InvoiceDetailProps) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Payments and Allocations */}
+      <Card className="shadow-sm">
+        <CardHeader className="pb-3 bg-muted/10 flex flex-row items-center justify-between">
+          <CardTitle className="text-sm font-bold text-ace-navy flex items-center gap-2">
+            <CreditCard className="h-4 w-4 text-emerald-600" /> Payments & Allocations ({(inv.allocations || []).length})
+          </CardTitle>
+          {inv.status === 'issued' && inv.balanceMinor > 0 && (
+            <Button asChild variant="outline" size="sm" className="h-7 text-xs gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+              <Link href={`/sales/payments/new?customerId=${inv.customer.id}&invoiceId=${inv.id}`}>
+                + Allocate Payment
+              </Link>
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent className="p-0">
+          {(inv.allocations || []).length === 0 ? (
+            <div className="p-6 text-center text-xs text-muted-foreground">
+              No payments have been allocated to this invoice yet.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader className="bg-muted/10">
+                <TableRow>
+                  <TableHead>Payment #</TableHead>
+                  <TableHead>Method</TableHead>
+                  <TableHead>Allocated Date</TableHead>
+                  <TableHead className="text-right">Allocated Amount</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {inv.allocations?.map((alloc) => (
+                  <TableRow key={alloc.id}>
+                    <TableCell className="font-mono text-xs font-semibold text-ace-navy">
+                      <Link href={`/sales/payments/${alloc.paymentId}`} className="hover:underline">
+                        {alloc.paymentNumber}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="capitalize text-xs">
+                      {alloc.paymentMethod.replace('_', ' ')}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {new Date(alloc.allocatedAt).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs font-semibold text-emerald-600">
+                      MWK {(alloc.amountMinor / 100).toLocaleString('en-MW', { minimumFractionDigits: 2 })}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Badge variant="outline" className="capitalize text-[10px]">
+                        {alloc.paymentStatus}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
+                        <Link href={`/sales/payments/${alloc.paymentId}`}>View</Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Active Reservations */}
       {inv.reservations.length > 0 && (

@@ -10,9 +10,11 @@ import {
   deliveryNotes,
   serialNumbers,
   products,
+  payments,
 } from '@/server/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { getCustomerById, getCustomerCreditStatus } from '@/server/services/sales/customers';
+import { getCustomerCredit } from '@/server/services/sales/payments';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -52,6 +54,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
   if (!customer) notFound();
 
   const creditStatus = await getCustomerCreditStatus(id);
+  const customerCredit = await getCustomerCredit(id);
 
   // Fetch all sales documents for this customer
   const documents = await db
@@ -59,6 +62,13 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
     .from(salesDocuments)
     .where(eq(salesDocuments.customerId, id))
     .orderBy(desc(salesDocuments.createdAt));
+
+  // Fetch payments for this customer
+  const customerPayments = await db
+    .select()
+    .from(payments)
+    .where(eq(payments.customerId, id))
+    .orderBy(desc(payments.createdAt));
 
   // Fetch quotations for this customer
   const customerQuotes = await db
@@ -93,7 +103,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
   return (
     <div className="space-y-6">
       {/* Top Navigation */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Button asChild variant="outline" size="sm" className="h-8 gap-1">
             <Link href="/sales/customers">
@@ -120,10 +130,23 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
             <p className="text-xs font-mono text-muted-foreground">Account #{customer.accountNumber}</p>
           </div>
         </div>
+
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline" size="sm" className="h-8 gap-1.5 shadow-sm">
+            <Link href={`/reports/customer-statement?customerId=${customer.id}`}>
+              <FileText className="h-3.5 w-3.5" /> Customer Statement
+            </Link>
+          </Button>
+          <Button asChild size="sm" className="h-8 gap-1.5 bg-emerald-600 text-white hover:bg-emerald-700 font-semibold shadow-sm">
+            <Link href={`/sales/payments/new?customerId=${customer.id}`}>
+              <CreditCard className="h-3.5 w-3.5" /> Record Payment
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {/* Profile & Credit Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-medium text-muted-foreground uppercase">
@@ -131,9 +154,9 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold font-mono text-foreground">
+            <div className="text-xl font-bold font-mono text-foreground">
               {customer.isWalkIn ? (
-                <span className="text-muted-foreground text-lg">N/A</span>
+                <span className="text-muted-foreground text-sm">N/A</span>
               ) : (
                 `MWK ${(creditStatus.creditLimitMinor / 100).toLocaleString('en-MW', {
                   minimumFractionDigits: 2,
@@ -153,7 +176,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold font-mono text-amber-600">
+            <div className="text-xl font-bold font-mono text-amber-600">
               MWK {(creditStatus.outstandingBalanceMinor / 100).toLocaleString('en-MW', {
                 minimumFractionDigits: 2,
               })}
@@ -165,17 +188,35 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-medium text-muted-foreground uppercase">
-              Available Credit
+              Available Credit Limit
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold font-mono ${creditStatus.availableCreditMinor < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+            <div className={`text-xl font-bold font-mono ${creditStatus.availableCreditMinor < 0 ? 'text-rose-600' : 'text-foreground'}`}>
               MWK {(creditStatus.availableCreditMinor / 100).toLocaleString('en-MW', {
                 minimumFractionDigits: 2,
               })}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               {creditStatus.isOverLimit ? 'Credit limit exceeded' : 'Credit standing good'}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm border-emerald-200 bg-emerald-50/20">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-emerald-800 uppercase flex items-center gap-1">
+              <CreditCard className="h-3 w-3 text-emerald-600" /> Customer Credit (Deposits)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-xl font-bold font-mono text-emerald-700">
+              MWK {(Number(customerCredit.creditMinor) / 100).toLocaleString('en-MW', {
+                minimumFractionDigits: 2,
+              })}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Unallocated funds / on deposit
             </p>
           </CardContent>
         </Card>
@@ -270,6 +311,83 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
                     <TableCell className="text-right">
                       <Button asChild variant="ghost" size="sm" className="h-7 w-7 p-0">
                         <a href={`/api/pdf/${doc.documentType}/${doc.id}`} target="_blank" rel="noreferrer">
+                          <Download className="h-3.5 w-3.5" />
+                        </a>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* Payments & Receipts Section */}
+      <Card className="shadow-sm overflow-hidden">
+        <CardHeader className="bg-muted/30 border-b py-3 flex flex-row items-center justify-between">
+          <CardTitle className="text-base font-semibold text-ace-navy flex items-center gap-2">
+            <CreditCard className="h-4 w-4 text-emerald-600" /> Payments & Receipts ({customerPayments.length})
+          </CardTitle>
+          <Button asChild variant="outline" size="sm" className="h-7 text-xs gap-1">
+            <Link href={`/sales/payments/new?customerId=${customer.id}`}>
+              + Record Payment
+            </Link>
+          </Button>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader className="bg-muted/20">
+              <TableRow>
+                <TableHead>Payment #</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Method</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Total Amount</TableHead>
+                <TableHead className="text-right">Receipt PDF</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {customerPayments.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                    No payments recorded for this customer yet.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                customerPayments.map((p) => (
+                  <TableRow key={p.id}>
+                    <TableCell className="font-mono font-semibold text-ace-navy">
+                      <Link href={`/sales/payments/${p.id}`} className="hover:underline">
+                        {p.paymentNumber}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {new Date(p.paymentDate).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell className="capitalize text-xs">
+                      {p.method.replace('_', ' ')}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={
+                          p.status === 'confirmed'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200 capitalize'
+                            : p.status === 'pending'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200 capitalize'
+                            : 'bg-rose-50 text-rose-700 border-rose-200 capitalize'
+                        }
+                      >
+                        {p.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-mono font-medium">
+                      MWK {(p.amountMinor / 100).toLocaleString('en-MW', { minimumFractionDigits: 2 })}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button asChild variant="ghost" size="sm" className="h-7 w-7 p-0">
+                        <a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer">
                           <Download className="h-3.5 w-3.5" />
                         </a>
                       </Button>

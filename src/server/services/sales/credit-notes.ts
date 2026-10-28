@@ -29,6 +29,8 @@ import { eq, and, sql, inArray } from 'drizzle-orm';
 import { executeStockMovements } from '@/server/services/stock/stock-engine';
 import { getNextDocNumber } from '@/server/services/sequences';
 import { calculateSalesLine, calculateDocumentTotals, validateLineCredit } from '@/lib/sales-math';
+import { computePaymentStatus } from '@/lib/payment-math';
+import { releaseOverpaymentToCredit } from '@/server/services/sales/payments';
 import { writeAuditLog } from '@/server/services/audit';
 import Decimal from 'decimal.js';
 
@@ -472,16 +474,20 @@ export async function createCreditNote(input: CreateCreditNoteInput, userId?: st
     // 9. Update invoice credited_minor and balance_minor
     const newInvoiceCredited = invoice.creditedMinor + totals.totalMinor;
     const newInvoiceBalance = Math.max(0, invoice.totalMinor - newInvoiceCredited - invoice.paidMinor);
+    const newPaymentStatus = computePaymentStatus(invoice.totalMinor, newInvoiceCredited, invoice.paidMinor);
 
     await tx
       .update(salesDocuments)
       .set({
         creditedMinor: newInvoiceCredited,
         balanceMinor: newInvoiceBalance,
-        paymentStatus: newInvoiceBalance === 0 ? 'paid' : invoice.paymentStatus,
+        paymentStatus: newPaymentStatus,
         updatedAt: new Date(),
       })
       .where(eq(salesDocuments.id, invoice.id));
+
+    // Release overpayment if paid_minor > remaining net total
+    await releaseOverpaymentToCredit(invoice.id, userId, tx);
 
     // 10. Finalize credit note as issued and immutable
     const [finalCreditNote] = await tx

@@ -216,7 +216,7 @@ export const salesDocuments = pgTable(
     status: text('status').notNull().default('draft'),
     /** 'not_delivered' | 'partly_delivered' | 'delivered' */
     deliveryStatus: text('delivery_status').notNull().default('not_delivered'),
-    /** 'unpaid' | 'partly_paid' | 'paid' */
+    /** 'unpaid' | 'partly_paid' | 'paid' | 'credited' */
     paymentStatus: text('payment_status').notNull().default('unpaid'),
     issueDate: date('issue_date').notNull(),
     dueDate: date('due_date').notNull(),

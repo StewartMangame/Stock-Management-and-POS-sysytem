@@ -38,6 +38,12 @@ export function formatMwk(minor: bigint | number, { symbol = true } = {}): strin
 }
 
 /**
+ * Alias for formatMwk — formats a tambala (minor-unit) amount as MWK string.
+ * e.g. 150000 → "MWK 1,500.00"
+ */
+export const formatTambala = formatMwk;
+
+/**
  * Parse a user-entered kwacha amount (e.g. "1,500.00") into minor units (tambala).
  * Strips commas and multiplies by 100, rounding half-up.
  */

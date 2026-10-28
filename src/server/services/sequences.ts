@@ -40,6 +40,7 @@ export async function getNextDocNumber(
       quotation: 'QT',
       delivery_note: 'DN',
       credit_note: 'CN',
+      payment: 'PAY',
     };
     const prefix = `${locCode}-${typePrefixMap[docType] || docType.toUpperCase()}`;
 

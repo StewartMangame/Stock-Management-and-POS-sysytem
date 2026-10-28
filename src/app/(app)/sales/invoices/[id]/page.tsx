@@ -13,6 +13,8 @@ import {
   quotations,
   deliveryNotes,
   stockReservations,
+  payments,
+  paymentAllocations,
 } from '@/server/db/schema';
 import { eq, and, desc } from 'drizzle-orm';
 import { InvoiceDetailClient } from './InvoiceDetailClient';
@@ -176,6 +178,22 @@ export default async function InvoiceDetailPage({ params }: InvoicePageProps) {
       ),
     );
 
+  // 7. Fetch payment allocations
+  const relatedAllocations = await db
+    .select({
+      id: paymentAllocations.id,
+      paymentId: paymentAllocations.paymentId,
+      amountMinor: paymentAllocations.amountMinor,
+      allocatedAt: paymentAllocations.allocatedAt,
+      paymentNumber: payments.paymentNumber,
+      paymentMethod: payments.method,
+      paymentStatus: payments.status,
+    })
+    .from(paymentAllocations)
+    .innerJoin(payments, eq(paymentAllocations.paymentId, payments.id))
+    .where(eq(paymentAllocations.invoiceId, id))
+    .orderBy(desc(paymentAllocations.allocatedAt));
+
   const formattedData = {
     id: inv.id,
     documentNumber: inv.documentNumber,
@@ -236,6 +254,10 @@ export default async function InvoiceDetailPage({ params }: InvoicePageProps) {
       ...r,
       reservedQty: r.reservedQty.toString(),
       expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
+    })),
+    allocations: relatedAllocations.map((a) => ({
+      ...a,
+      allocatedAt: a.allocatedAt.toISOString(),
     })),
   };
 
