@@ -18,6 +18,7 @@ import {
   stockMovements,
   serialNumbers,
   locations,
+  stockReservations,
 } from '@/server/db/schema';
 import { calcNewCompanyAverageCost, roundHalfUp, toDecimalQty } from '@/lib/stock-math';
 import Decimal from 'decimal.js';
@@ -37,7 +38,13 @@ export interface MovementItem {
     | 'count_variance'
     | 'transfer_in'
     | 'transfer_out';
-  referenceType: 'goods_receipt' | 'stock_adjustment' | 'stock_count' | 'opening_stock';
+  referenceType:
+    | 'goods_receipt'
+    | 'stock_adjustment'
+    | 'stock_count'
+    | 'opening_stock'
+    | 'delivery_note'
+    | 'credit_note';
   referenceId?: string;
   notes?: string;
   serialNumbers?: string[]; // Serials associated with this movement
@@ -337,13 +344,29 @@ export async function rebuildStockBalances(tx: any): Promise<{
   balancesUpdated: number;
   productsUpdated: number;
 }> {
-  // 1. Reset all stock balances to 0 on_hand
-  await tx.update(stockBalances).set({ onHand: '0', updatedAt: new Date() });
+  // 1. Reset all stock balances to 0 on_hand and 0 reserved to satisfy CHECK (reserved <= on_hand)
+  await tx.update(stockBalances).set({ onHand: '0', reserved: '0', updatedAt: new Date() });
 
   // 2. Reset products avg_cost_minor and last_cost_minor to 0
   await tx.update(products).set({ avgCostMinor: 0, lastCostMinor: 0, updatedAt: new Date() });
 
-  // 3. Load all movements in chronological order
+  // 3. Load active stock reservations
+  const activeReservations = await tx
+    .select({
+      productId: stockReservations.productId,
+      locationId: stockReservations.locationId,
+      totalReserved: sql<string>`COALESCE(SUM(${stockReservations.reservedQty} - ${stockReservations.fulfilledQty}), 0)`,
+    })
+    .from(stockReservations)
+    .where(eq(stockReservations.status, 'active'))
+    .groupBy(stockReservations.productId, stockReservations.locationId);
+
+  const reservationMap = new Map<string, string>();
+  for (const r of activeReservations) {
+    reservationMap.set(`${r.productId}:${r.locationId}`, r.totalReserved);
+  }
+
+  // 4. Load all movements in chronological order
   const movements = await tx
     .select()
     .from(stockMovements)
@@ -382,32 +405,37 @@ export async function rebuildStockBalances(tx: any): Promise<{
     pState.totalOnHand = pState.totalOnHand.plus(qty);
   }
 
-  // 4. Flush recomputed balances to DB
-  let balancesCount = 0;
-  for (const [key, qty] of balanceState.entries()) {
-    const [productId, locationId] = key.split(':') as [string, string];
-    await tx
-      .insert(stockBalances)
-      .values({
+  // 5. Flush recomputed balances to DB via single bulk upsert
+  const balanceEntries = Array.from(balanceState.entries());
+  if (balanceEntries.length > 0) {
+    const balanceValues = balanceEntries.map(([key, qty]) => {
+      const [productId, locationId] = key.split(':') as [string, string];
+      const reservedQty = reservationMap.get(key) || '0';
+      return {
         productId,
         locationId,
         onHand: qty.toFixed(3),
-        reserved: '0',
+        reserved: reservedQty,
         updatedAt: new Date(),
-      })
+      };
+    });
+
+    await tx
+      .insert(stockBalances)
+      .values(balanceValues)
       .onConflictDoUpdate({
         target: [stockBalances.productId, stockBalances.locationId],
         set: {
-          onHand: qty.toFixed(3),
-          updatedAt: new Date(),
+          onHand: sql`excluded.on_hand`,
+          reserved: sql`excluded.reserved`,
+          updatedAt: sql`excluded.updated_at`,
         },
       });
-    balancesCount++;
   }
 
-  // 5. Flush recomputed product costs to DB
-  let productsCount = 0;
-  for (const [productId, state] of productState.entries()) {
+  // 6. Flush recomputed product costs to DB
+  const productEntries = Array.from(productState.entries());
+  for (const [productId, state] of productEntries) {
     await tx
       .update(products)
       .set({
@@ -416,10 +444,9 @@ export async function rebuildStockBalances(tx: any): Promise<{
         updatedAt: new Date(),
       })
       .where(eq(products.id, productId));
-    productsCount++;
   }
 
-  return { balancesUpdated: balancesCount, productsUpdated: productsCount };
+  return { balancesUpdated: balanceEntries.length, productsUpdated: productEntries.length };
 }
 
 /**

@@ -21,6 +21,8 @@ const SETTING_META: Record<SettingKey, { label: string; description: string; typ
   company_email:                        { label: 'Company Email',                        description: 'Printed on all documents',                                 type: 'text' },
   company_tax_number:                   { label: 'Tax / TPIN Number',                    description: 'Printed on VAT invoices',                                  type: 'text' },
   eis_enabled:                          { label: 'Enable MRA EIS',                       description: 'Submit invoices to MRA Electronic Invoicing System',       type: 'boolean' },
+  invoice_payment_instructions:         { label: 'Invoice Payment Instructions',         description: 'Bank account and payment details printed at the bottom of invoices', type: 'text' },
+  reservation_hold_days:                { label: 'Reservation Hold Days',                description: 'Default days stock reservations are held on acceptance',   type: 'number' },
 };
 
 export default async function SettingsPage() {
@@ -39,7 +41,7 @@ export default async function SettingsPage() {
     },
     {
       title: 'Sales & Tax',
-      keys: ['default_currency', 'prices_include_tax', 'max_discount_percent_without_approval', 'quotation_valid_days'] as SettingKey[],
+      keys: ['default_currency', 'prices_include_tax', 'max_discount_percent_without_approval', 'quotation_valid_days', 'invoice_payment_instructions', 'reservation_hold_days'] as SettingKey[],
     },
     {
       title: 'Stock & Costing',

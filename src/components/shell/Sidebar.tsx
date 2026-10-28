@@ -40,6 +40,7 @@ const navGroups: NavItem[] = [
       { label: 'Quotations', href: '/sales/quotations' },
       { label: 'Invoices', href: '/sales/invoices' },
       { label: 'Delivery Notes', href: '/sales/delivery-notes' },
+      { label: 'Credit Notes', href: '/sales/credit-notes' },
       { label: 'Payments', href: '/sales/payments' },
       { label: 'Aged Debtors', href: '/sales/aged-debtors' },
     ],

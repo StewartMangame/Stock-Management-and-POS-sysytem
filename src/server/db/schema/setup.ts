@@ -120,6 +120,8 @@ export const SETTING_KEYS = [
   'company_email',
   'company_tax_number',
   'eis_enabled',
+  'invoice_payment_instructions',
+  'reservation_hold_days',
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];

@@ -14,9 +14,12 @@
  *     after: { status: 'void' },
  *     ip,
  *   });
+ *
+ * Or use logAuditEvent() for post-commit logging (no TX required):
+ *   await logAuditEvent({ userId, action: 'customer_created', entityType: 'customer', entityId: id });
  */
 
-import type { db as DbType } from '@/server/db';
+import { db } from '@/server/db';
 import { auditLog } from '@/server/db/schema';
 
 export type AuditAction =
@@ -41,12 +44,15 @@ export interface WriteAuditLogParams {
   ip?: string | null;
 }
 
+/** Minimal shared interface between db and transactions — only `insert` is needed. */
+type AuditDatabase = Pick<typeof db, 'insert'>;
+
 /**
- * Writes an entry to the audit_log table.
- * Pass the Drizzle `db` instance or a transaction (they share the same interface).
+ * Writes an entry to the audit_log table inside the provided Drizzle database/transaction.
+ * Accepts either the top-level `db` instance or a transaction (`tx`) — both expose `insert`.
  */
 export async function writeAuditLog(
-  database: typeof DbType,
+  database: AuditDatabase,
   params: WriteAuditLogParams,
 ): Promise<void> {
   await database.insert(auditLog).values({
@@ -58,4 +64,12 @@ export async function writeAuditLog(
     after: params.after ?? null,
     ip: params.ip ?? null,
   });
+}
+
+/**
+ * Convenience wrapper — logs using the module-level `db` instance (no TX).
+ * Use for post-commit audit entries where atomicity with the TX is not required.
+ */
+export async function logAuditEvent(params: WriteAuditLogParams): Promise<void> {
+  await writeAuditLog(db, params);
 }

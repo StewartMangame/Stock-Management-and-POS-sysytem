@@ -28,9 +28,11 @@ import {
   uniqueIndex,
   index,
   check,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 import { locations, users, taxRates, citext } from './setup';
+import { customers } from './sales';
 
 // ── Categories ───────────────────────────────────────────────────────────────
 
@@ -251,8 +253,10 @@ export const serialNumbers = pgTable(
     }),
     warrantyStart: date('warranty_start'),
     warrantyEnd: date('warranty_end'),
-    /** Unconstrained until Phase 2 customers table is created */
-    customerId: uuid('customer_id'),
+    /** Customer who purchased this serial item */
+    customerId: uuid('customer_id').references((): AnyPgColumn => customers.id, {
+      onDelete: 'restrict',
+    }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }),
   },
@@ -260,12 +264,14 @@ export const serialNumbers = pgTable(
     uniqueIndex('serial_numbers_prod_lower_idx').on(t.productId, sql`lower(${t.serialNumber})`),
     index('serial_numbers_status_idx').on(t.status),
     index('serial_numbers_location_idx').on(t.locationId),
+    index('serial_numbers_customer_idx').on(t.customerId),
   ],
 );
 
 export const serialNumbersRelations = relations(serialNumbers, ({ one }) => ({
   product: one(products, { fields: [serialNumbers.productId], references: [products.id] }),
   location: one(locations, { fields: [serialNumbers.locationId], references: [locations.id] }),
+  customer: one(customers, { fields: [serialNumbers.customerId], references: [customers.id] }),
 }));
 
 // ── Suppliers ────────────────────────────────────────────────────────────────

@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { db } from '@/server/db';
 import { locations, suppliers, purchaseOrders, numberSequences } from '@/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { getNextDocNumber } from '@/server/services/sequences';
 
-describe('Document Number Sequencing & Collision Prevention', () => {
+describe('Document Number Sequencing & Rollback Guarantees', () => {
   let testLocId: string;
   let testSupplierId: string;
+  let locCode: string;
 
   beforeAll(async () => {
     const [loc] = await db
@@ -18,6 +19,7 @@ describe('Document Number Sequencing & Collision Prevention', () => {
       })
       .returning();
     testLocId = loc!.id;
+    locCode = loc!.code;
 
     const [supp] = await db
       .insert(suppliers)
@@ -29,10 +31,9 @@ describe('Document Number Sequencing & Collision Prevention', () => {
     testSupplierId = supp!.id;
   });
 
-  it('skips existing document numbers to avoid unique constraint violations', async () => {
-    // 1. Manually insert a PO with sequence number 1 before the sequence is even initialized
-    const [loc] = await db.select({ code: locations.code }).from(locations).where(eq(locations.id, testLocId));
-    const expectedFirstNum = `${loc!.code}-PO-0001`;
+  it('generates strictly sequential numbers and duplicate insert raises error', async () => {
+    // 1. Manually insert a PO with sequence number 1
+    const expectedFirstNum = `${locCode}-PO-0001`;
 
     await db.insert(purchaseOrders).values({
       poNumber: expectedFirstNum,
@@ -46,31 +47,56 @@ describe('Document Number Sequencing & Collision Prevention', () => {
       totalSupplierCurrency: '1000',
     });
 
-    // 2. Now call getNextDocNumber - it should detect PO-0001 is taken and automatically return PO-0002
+    // 2. getNextDocNumber without skipping will yield PO-0001 from sequence table
     const docNum = await db.transaction(async (tx) => {
       return await getNextDocNumber(tx, 'purchase_order', testLocId);
     });
+    expect(docNum).toBe(expectedFirstNum);
 
-    const expectedSecondNum = `${loc!.code}-PO-0002`;
-    expect(docNum).toBe(expectedSecondNum);
+    // 3. Inserting the duplicate number MUST raise a database unique constraint error
+    await expect(
+      db.insert(purchaseOrders).values({
+        poNumber: docNum,
+        supplierId: testSupplierId,
+        locationId: testLocId,
+        status: 'draft',
+        orderDate: new Date().toISOString().split('T')[0]!,
+        currency: 'MWK',
+        exchangeRate: '1',
+        totalMinor: 200000,
+        totalSupplierCurrency: '2000',
+      })
+    ).rejects.toThrow();
+  });
 
-    // 3. Insert using the generated number - must succeed without unique constraint error
-    await db.insert(purchaseOrders).values({
-      poNumber: docNum,
-      supplierId: testSupplierId,
-      locationId: testLocId,
-      status: 'draft',
-      orderDate: new Date().toISOString().split('T')[0]!,
-      currency: 'MWK',
-      exchangeRate: '1',
-      totalMinor: 200000,
-      totalSupplierCurrency: '2000',
+  it('a rolled-back transaction does not burn a number', async () => {
+    // We create a fresh location for isolated sequence testing
+    const [loc] = await db
+      .insert(locations)
+      .values({
+        name: 'Rollback Seq Outlet',
+        code: `RB-${Date.now().toString().slice(-4)}`,
+        type: 'outlet',
+      })
+      .returning();
+
+    let rolledBackNumber = '';
+
+    // Transaction that increments sequence and then fails/rolls back
+    await expect(
+      db.transaction(async (tx) => {
+        rolledBackNumber = await getNextDocNumber(tx, 'invoice', loc!.id);
+        expect(rolledBackNumber).toBe(`${loc!.code}-INV-0001`);
+        throw new Error('Simulated failure during invoice creation');
+      })
+    ).rejects.toThrow('Simulated failure during invoice creation');
+
+    // Next transaction attempting invoice creation receives the EXACT SAME number
+    const retryNumber = await db.transaction(async (tx) => {
+      return await getNextDocNumber(tx, 'invoice', loc!.id);
     });
 
-    // 4. Next call should return PO-0003
-    const nextDocNum = await db.transaction(async (tx) => {
-      return await getNextDocNumber(tx, 'purchase_order', testLocId);
-    });
-    expect(nextDocNum).toBe(`${loc!.code}-PO-0003`);
+    expect(retryNumber).toBe(rolledBackNumber);
+    expect(retryNumber).toBe(`${loc!.code}-INV-0001`);
   });
 });

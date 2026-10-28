@@ -37,3 +37,6 @@ export const db = drizzle({ client: pool, schema });
 
 /** Re-export pool for raw SQL queries (migrations, seed) */
 export { pool };
+
+/** Transaction type — use this to type `tx` parameters in service functions. */
+export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
