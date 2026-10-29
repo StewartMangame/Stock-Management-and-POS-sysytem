@@ -78,23 +78,28 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
   const [loadingCatalog, setLoadingCatalog] = useState(false);
 
-  // Cart State (hydrated from and synced to sessionStorage)
-  const [cart, setCart] = useState<CartItem[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = sessionStorage.getItem('ace_pos_cart');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) return parsed;
-        }
-      } catch {}
-    }
-    return [];
-  });
+  // Cart State (hydrated after mount to prevent SSR hydration mismatch)
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [hasMounted, setHasMounted] = useState(false);
   const [heldCount, setHeldCount] = useState(0);
 
-  // Sync cart to sessionStorage
+  // Restore cart from sessionStorage on client mount
   useEffect(() => {
+    setHasMounted(true);
+    try {
+      const saved = sessionStorage.getItem('ace_pos_cart');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setCart(parsed);
+        }
+      }
+    } catch {}
+  }, []);
+
+  // Sync cart to sessionStorage once mounted
+  useEffect(() => {
+    if (!hasMounted) return;
     try {
       if (cart.length > 0) {
         sessionStorage.setItem('ace_pos_cart', JSON.stringify(cart));
@@ -102,7 +107,7 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
         sessionStorage.removeItem('ace_pos_cart');
       }
     } catch {}
-  }, [cart]);
+  }, [cart, hasMounted]);
 
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState('');
