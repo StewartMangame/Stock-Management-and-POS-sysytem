@@ -239,6 +239,14 @@ export const salesDocuments = pgTable(
     approvedAt: timestamp('approved_at', { withTimezone: true }),
     notes: text('notes'),
     terms: text('terms'),
+    /** 'office' | 'counter' */
+    channel: text('channel').notNull().default('office'),
+    /** POS Shift ID for counter sales */
+    shiftId: uuid('shift_id'),
+    /** Unique client idempotency key for counter sales */
+    idempotencyKey: text('idempotency_key').unique(),
+    /** Offline / client timestamp when the sale was finalized at the terminal */
+    clientCreatedAt: timestamp('client_created_at', { withTimezone: true }),
     /** EIS integration fields (Phase 5 will enforce; status defaults to 'not_required') */
     eisStatus: text('eis_status').notNull().default('not_required'),
     eisReference: text('eis_reference'),
@@ -254,6 +262,7 @@ export const salesDocuments = pgTable(
     index('sales_docs_source_doc_idx').on(t.sourceDocumentId),
     index('sales_docs_delivery_status_idx').on(t.deliveryStatus),
     index('sales_docs_payment_status_idx').on(t.paymentStatus),
+    index('sales_docs_shift_idx').on(t.shiftId),
   ],
 );
 

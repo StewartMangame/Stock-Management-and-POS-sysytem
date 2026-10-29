@@ -86,6 +86,10 @@ export const users = pgTable('users', {
   /** Force a password change on the next login (set true for seeded admin). */
   forcePasswordChange: boolean('force_password_change').notNull().default(false),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  /** 6-digit PIN hash for POS manager overrides */
+  pinHash: text('pin_hash'),
+  pinFailedAttempts: integer('pin_failed_attempts').notNull().default(0),
+  pinLockedUntil: timestamp('pin_locked_until', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }),
   createdBy: uuid('created_by').references((): AnyPgColumn => users.id, {
@@ -122,6 +126,8 @@ export const SETTING_KEYS = [
   'eis_enabled',
   'invoice_payment_instructions',
   'reservation_hold_days',
+  'pos_blind_cash_up',
+  'pos_return_window_days',
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];

@@ -27,10 +27,11 @@ import {
 } from '@/server/db/schema';
 import { eq, and, sql, inArray } from 'drizzle-orm';
 import { executeStockMovements } from '@/server/services/stock/stock-engine';
-import { getNextDocNumber } from '@/server/services/sequences';
+import { nextSequenceNumber } from '@/server/services/sequences';
+import { todayInCompanyTz } from '@/lib/timezone';
 import { calculateSalesLine, calculateDocumentTotals, validateLineCredit } from '@/lib/sales-math';
 import { computePaymentStatus } from '@/lib/payment-math';
-import { releaseOverpaymentToCredit } from '@/server/services/sales/payments';
+import { releaseOverpaymentToCredit, getCustomerCredit } from '@/server/services/sales/payments';
 import { writeAuditLog } from '@/server/services/audit';
 import Decimal from 'decimal.js';
 
@@ -52,14 +53,22 @@ export interface CreateCreditNoteInput {
   lines: CreditNoteLineInput[];
 }
 
-export async function createCreditNote(input: CreateCreditNoteInput, userId?: string) {
+export interface CreateCreditNoteOptions {
+  skipWalkInCheck?: boolean;
+}
+
+export async function createCreditNoteWithTx(
+  tx: DbTransaction,
+  input: CreateCreditNoteInput & { channel?: string; shiftId?: string },
+  userId?: string,
+  options?: CreateCreditNoteOptions,
+) {
   if (!input.lines || input.lines.length === 0) {
     throw new Error('Credit note must contain at least one line');
   }
 
-  return await db.transaction(async (tx) => {
-    // 1. Lock invoice header
-    const [invoice] = await tx
+  // 1. Lock invoice header
+  const [invoice] = await tx
       .select()
       .from(salesDocuments)
       .where(eq(salesDocuments.id, input.invoiceId))
@@ -162,9 +171,7 @@ export async function createCreditNote(input: CreateCreditNoteInput, userId?: st
       lineNotes?: string;
     }> = [];
 
-    // Temporary ID for credit note in stock movement reference
-    const creditNumber = await getNextDocNumber(tx, 'credit_note', invoice.locationId);
-    const issueDateStr = input.issueDate || new Date().toISOString().split('T')[0]!;
+    const issueDateStr = input.issueDate || todayInCompanyTz();
 
     for (const inputLine of input.lines) {
       const invLine = invoiceLineMap.get(inputLine.sourceLineId);
@@ -379,7 +386,9 @@ export async function createCreditNote(input: CreateCreditNoteInput, userId?: st
       );
     }
 
-    // 6. Insert credit note header (initially 'draft' so lines trigger permits insert)
+    // 6. Assign sequence number and insert credit note header (initially 'draft' so lines trigger permits insert)
+    const creditNumber = await nextSequenceNumber(tx, 'credit_note', invoice.locationId);
+
     const [creditNote] = await tx
       .insert(salesDocuments)
       .values({
@@ -405,6 +414,8 @@ export async function createCreditNote(input: CreateCreditNoteInput, userId?: st
         isImmutable: false,
         notes: input.notes,
         terms: input.terms,
+        channel: input.channel ?? 'office',
+        shiftId: input.shiftId ?? null,
         eisStatus: 'not_required',
         createdBy: userId,
       })
@@ -510,6 +521,27 @@ export async function createCreditNote(input: CreateCreditNoteInput, userId?: st
       });
     }
 
+    // 11. Walk-in customer credit block check at end of transaction
+    if (customer.isWalkIn && !options?.skipWalkInCheck) {
+      const creditStatus = await getCustomerCredit(customer.id, tx);
+      if (creditStatus.creditMinor > BigInt(0)) {
+        throw new Error('Walk-in customer cannot hold credit');
+      }
+    }
+
     return finalCreditNote!;
+}
+
+export async function createCreditNote(
+  input: CreateCreditNoteInput & { channel?: string; shiftId?: string },
+  userId?: string,
+  options?: CreateCreditNoteOptions,
+) {
+  if (!input.lines || input.lines.length === 0) {
+    throw new Error('Credit note must contain at least one line');
+  }
+
+  return await db.transaction(async (tx) => {
+    return await createCreditNoteWithTx(tx, input, userId, options);
   });
 }

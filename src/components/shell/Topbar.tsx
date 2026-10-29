@@ -62,7 +62,12 @@ export function Topbar() {
             <DropdownMenuItem
               id="sign-out-btn"
               className="text-red-600 focus:bg-red-50 focus:text-red-700"
-              onClick={() => signOut({ callbackUrl: '/login' })}
+              onClick={() => {
+                try {
+                  sessionStorage.removeItem('ace_pos_cart');
+                } catch {}
+                signOut({ callbackUrl: '/login' });
+              }}
             >
               <LogOut className="mr-2 h-4 w-4" />
               Sign Out

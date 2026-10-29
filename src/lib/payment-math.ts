@@ -28,7 +28,12 @@ export interface AgedInvoiceBuckets {
 
 // ── Method Details Zod Schemas ───────────────────────────────────────────────
 
-export const CashDetailsSchema = z.object({}).passthrough();
+export const CashDetailsSchema = z
+  .object({
+    tendered_minor: z.number().int().nonnegative().optional(),
+    change_minor: z.number().int().nonnegative().optional(),
+  })
+  .passthrough();
 
 export const BankTransferDetailsSchema = z.object({
   bank_reference: z.string().min(1, 'Bank reference is required'),

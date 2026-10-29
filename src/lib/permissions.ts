@@ -51,6 +51,8 @@ export const PERMISSIONS = {
   // ── POS / shifts ──────────────────────────────────────────────────────
   POS_ACCESS: 'pos:access',
   SHIFTS_MANAGE: 'shifts:manage',
+  POS_OVERRIDE: 'pos:override',
+  POS_REPRINT_ANY: 'pos:reprint_any',
 
   // ── Reports ───────────────────────────────────────────────────────────
   REPORTS_VIEW: 'reports:view',
@@ -94,6 +96,7 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     PERMISSIONS.PAYMENTS_REVERSE, PERMISSIONS.PAYMENTS_CHEQUE_CLEAR,
     // POS
     PERMISSIONS.POS_ACCESS, PERMISSIONS.SHIFTS_MANAGE,
+    PERMISSIONS.POS_OVERRIDE, PERMISSIONS.POS_REPRINT_ANY,
     // Reports + approvals
     PERMISSIONS.REPORTS_VIEW,
     PERMISSIONS.DISCOUNTS_APPROVE, PERMISSIONS.REFUNDS_APPROVE,
@@ -123,6 +126,7 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   cashier: [
     PERMISSIONS.POS_ACCESS,
     PERMISSIONS.SHIFTS_MANAGE,
+    PERMISSIONS.PAYMENTS_RECORD,
     PERMISSIONS.PRODUCTS_VIEW,
     PERMISSIONS.CUSTOMERS_VIEW,
     PERMISSIONS.STOCK_VIEW,

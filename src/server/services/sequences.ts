@@ -2,16 +2,31 @@ import { numberSequences, locations } from '@/server/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { formatDocNumber } from '@/lib/money';
 
-/**
- * Gets the next sequential document number within a transaction.
- *
- * Requirements:
- * - Strictly gap-free: Locks the number_sequences row (FOR UPDATE) within the
- *   SAME transaction as the document insert.
- * - If the transaction rolls back, the sequence row rollback returns the number.
- * - Does NOT skip existing numbers; any duplicate raises a database unique constraint error.
- */
-export async function getNextDocNumber(
+const typePrefixMap: Record<string, string> = {
+  purchase_order: 'PO',
+  goods_receipt: 'GRN',
+  stock_adjustment: 'ADJ',
+  stock_count: 'CNT',
+  invoice: 'INV',
+  quotation: 'QT',
+  delivery_note: 'DN',
+  credit_note: 'CN',
+  payment: 'PAY',
+  shift: 'SHF',
+  pos_shift: 'SHF',
+  SHF: 'SHF',
+  INV: 'INV',
+  DN: 'DN',
+  CN: 'CN',
+  PAY: 'PAY',
+  PO: 'PO',
+  GRN: 'GRN',
+  ADJ: 'ADJ',
+  CNT: 'CNT',
+  QT: 'QT',
+};
+
+async function _getNextDocNumber(
   tx: any,
   docType: string,
   locationId: string,
@@ -31,17 +46,6 @@ export async function getNextDocNumber(
       .where(eq(locations.id, locationId));
 
     const locCode = loc?.code ?? 'MAIN';
-    const typePrefixMap: Record<string, string> = {
-      purchase_order: 'PO',
-      goods_receipt: 'GRN',
-      stock_adjustment: 'ADJ',
-      stock_count: 'CNT',
-      invoice: 'INV',
-      quotation: 'QT',
-      delivery_note: 'DN',
-      credit_note: 'CN',
-      payment: 'PAY',
-    };
     const prefix = `${locCode}-${typePrefixMap[docType] || docType.toUpperCase()}`;
 
     await tx
@@ -76,3 +80,25 @@ export async function getNextDocNumber(
 
   return formatted;
 }
+
+/**
+ * Gets the next sequential document number within a transaction.
+ * Supports both signatures:
+ *   nextSequenceNumber(tx, docType, locationId)
+ *   nextSequenceNumber(docType, locationId, tx)
+ */
+export async function nextSequenceNumber(
+  arg1: any,
+  arg2: string,
+  arg3: any,
+): Promise<string> {
+  if (typeof arg1 === 'string') {
+    return _getNextDocNumber(arg3, arg1, arg2);
+  }
+  return _getNextDocNumber(arg1, arg2, arg3);
+}
+
+/**
+ * Backwards-compatible alias for existing callers.
+ */
+export const getNextDocNumber = nextSequenceNumber;

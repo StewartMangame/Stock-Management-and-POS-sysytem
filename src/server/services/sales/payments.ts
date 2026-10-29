@@ -31,7 +31,8 @@ import {
   type PaymentMethod,
   type PaymentKind,
 } from '@/lib/payment-math';
-import { getNextDocNumber } from '@/server/services/sequences';
+import { nextSequenceNumber } from '@/server/services/sequences';
+import { todayInCompanyTz } from '@/lib/timezone';
 import { writeAuditLog } from '@/server/services/audit';
 
 export type Payment = typeof payments.$inferSelect;
@@ -196,7 +197,8 @@ export async function getCustomerCredit(
 
 // ── 1. Record Payment ────────────────────────────────────────────────────────
 
-export async function recordPayment(
+export async function recordPaymentWithTx(
+  tx: DbTransaction,
   input: RecordPaymentInput,
   userId?: string,
 ): Promise<RecordPaymentResult> {
@@ -206,7 +208,7 @@ export async function recordPayment(
   }
 
   const paymentDateStr = parseDateToIsoString(input.paymentDate);
-  const todayStr = new Date().toISOString().split('T')[0] ?? '';
+  const todayStr = todayInCompanyTz();
   if (paymentDateStr > todayStr) {
     throw new Error('Payment date cannot be in the future');
   }
@@ -214,10 +216,21 @@ export async function recordPayment(
   // Validate method details
   const validatedDetails = validateMethodDetails(input.method, input.methodDetails);
 
+  // Validate tender amounts
+  if (input.method !== 'cash') {
+    const md = input.methodDetails as Record<string, unknown> | undefined;
+    if (md && typeof md === 'object' && 'tendered_minor' in md) {
+      const tendered = Number(md.tendered_minor);
+      if (tendered > amountMinor) {
+        throw new Error('Non-cash payments cannot be over-tendered');
+      }
+    }
+  }
+
   // Validate card terminal location if card payment
   if (input.method === 'card') {
     const cardData = validatedDetails as { terminal_id: string };
-    const [term] = await db
+    const [term] = await tx
       .select()
       .from(cardTerminals)
       .where(eq(cardTerminals.id, cardData.terminal_id));
@@ -234,7 +247,7 @@ export async function recordPayment(
   let warning: string | undefined;
   if (input.method === 'bank_transfer') {
     const bankRef = (validatedDetails as { bank_reference: string }).bank_reference;
-    const [existingBank] = await db
+    const [existingBank] = await tx
       .select({ id: payments.id, paymentNumber: payments.paymentNumber })
       .from(payments)
       .where(
@@ -269,166 +282,185 @@ export async function recordPayment(
     initialReconciliation = 'unreconciled';
   }
 
-  return await db.transaction(async (tx) => {
-    // 1. Idempotency check with conflict detection
-    const [existing] = await tx
+  // 1. Idempotency check with conflict detection
+  const [existing] = await tx
+    .select()
+    .from(payments)
+    .where(eq(payments.idempotencyKey, input.idempotencyKey));
+
+  if (existing) {
+    if (
+      existing.customerId !== input.customerId ||
+      Number(existing.amountMinor) !== amountMinor
+    ) {
+      throw new Error('Idempotency key conflict: customer or amount mismatch');
+    }
+    return { payment: existing, warning, isDuplicate: true };
+  }
+
+  // 2. Lock customer & check walk-in credit block
+  const [customer] = await tx
+    .select({ id: customers.id, isWalkIn: customers.isWalkIn })
+    .from(customers)
+    .where(eq(customers.id, input.customerId))
+    .for('update');
+
+  if (!customer) throw new Error('Customer not found');
+
+  if (customer.isWalkIn && kind === 'receipt') {
+    const allocatedSum = (input.allocations || []).reduce(
+      (sum, a) => sum + Number(a.amountMinor),
+      0,
+    );
+    if (allocatedSum < amountMinor) {
+      throw new Error('Walk-in customer cannot hold credit');
+    }
+  }
+
+  // 3. Number assignment under transaction lock
+  const paymentNumber = await nextSequenceNumber(tx, 'payment', input.locationId);
+
+  // 4. Cheque handling: store intended allocations
+  const intendedAllocations =
+    input.method === 'cheque' && input.allocations && input.allocations.length > 0
+      ? input.allocations
+      : null;
+
+  // 5. Insert payment row with ON CONFLICT DO NOTHING guard
+  const [inserted] = await tx
+    .insert(payments)
+    .values({
+      paymentNumber,
+      idempotencyKey: input.idempotencyKey,
+      customerId: input.customerId,
+      locationId: input.locationId,
+      shiftId: input.shiftId ?? null,
+      kind,
+      method: input.method,
+      currency: 'MWK',
+      amountMinor,
+      status: initialStatus,
+      reconciliationStatus: initialReconciliation,
+      methodDetails: validatedDetails,
+      intendedAllocations,
+      providerReference: input.providerReference ?? null,
+      paymentDate: paymentDateStr,
+      notes: input.notes ?? null,
+      createdBy: userId ?? null,
+    })
+    .onConflictDoNothing()
+    .returning();
+
+  if (!inserted) {
+    // Handled concurrent insert with same key
+    const [duplicate] = await tx
       .select()
       .from(payments)
       .where(eq(payments.idempotencyKey, input.idempotencyKey));
 
-    if (existing) {
-      if (
-        existing.customerId !== input.customerId ||
-        Number(existing.amountMinor) !== amountMinor
-      ) {
-        throw new Error('Idempotency key conflict: customer or amount mismatch');
-      }
-      return { payment: existing, warning, isDuplicate: true };
+    if (!duplicate) {
+      throw new Error('Duplicate payment could not be re-selected');
     }
 
-    // 2. Lock customer
-    await tx
-      .select({ id: customers.id })
-      .from(customers)
-      .where(eq(customers.id, input.customerId))
+    if (
+      duplicate.customerId !== input.customerId ||
+      Number(duplicate.amountMinor) !== amountMinor
+    ) {
+      throw new Error('Idempotency key conflict: customer or amount mismatch');
+    }
+    return { payment: duplicate, warning, isDuplicate: true };
+  }
+
+  // 6. If confirmed receipt and allocations provided, apply them
+  if (
+    initialStatus === 'confirmed' &&
+    kind === 'receipt' &&
+    input.allocations &&
+    input.allocations.length > 0
+  ) {
+    const totalToAllocate = input.allocations.reduce(
+      (sum, a) => sum + Number(a.amountMinor),
+      0,
+    );
+    if (totalToAllocate > amountMinor) {
+      throw new Error(
+        `Allocations total (${totalToAllocate}) exceeds payment amount (${amountMinor})`,
+      );
+    }
+
+    // Sort invoice IDs ASC to lock invoices deterministically
+    const invoiceIds = [...new Set(input.allocations.map((a) => a.invoiceId))].sort();
+
+    const invoices = await tx
+      .select()
+      .from(salesDocuments)
+      .where(inArray(salesDocuments.id, invoiceIds))
+      .orderBy(asc(salesDocuments.id))
       .for('update');
 
-    // 3. Number assignment under transaction lock
-    const paymentNumber = await getNextDocNumber(tx, 'payment', input.locationId);
+    const invoiceMap = new Map(invoices.map((inv) => [inv.id, inv]));
 
-    // 4. Cheque handling: store intended allocations
-    const intendedAllocations =
-      input.method === 'cheque' && input.allocations && input.allocations.length > 0
-        ? input.allocations
-        : null;
-
-    // 5. Insert payment row with ON CONFLICT DO NOTHING guard
-    const [inserted] = await tx
-      .insert(payments)
-      .values({
-        paymentNumber,
-        idempotencyKey: input.idempotencyKey,
-        customerId: input.customerId,
-        locationId: input.locationId,
-        shiftId: input.shiftId ?? null,
-        kind,
-        method: input.method,
-        currency: 'MWK',
-        amountMinor,
-        status: initialStatus,
-        reconciliationStatus: initialReconciliation,
-        methodDetails: validatedDetails,
-        intendedAllocations,
-        providerReference: input.providerReference ?? null,
-        paymentDate: paymentDateStr,
-        notes: input.notes ?? null,
-        createdBy: userId ?? null,
-      })
-      .onConflictDoNothing()
-      .returning();
-
-    if (!inserted) {
-      // Handled concurrent insert with same key
-      const [duplicate] = await tx
-        .select()
-        .from(payments)
-        .where(eq(payments.idempotencyKey, input.idempotencyKey));
-
-      if (!duplicate) {
-        throw new Error('Duplicate payment could not be re-selected');
+    for (const alloc of input.allocations) {
+      const inv = invoiceMap.get(alloc.invoiceId);
+      if (!inv) {
+        throw new Error(`Invoice ${alloc.invoiceId} not found`);
       }
-
-      if (
-        duplicate.customerId !== input.customerId ||
-        Number(duplicate.amountMinor) !== amountMinor
-      ) {
-        throw new Error('Idempotency key conflict: customer or amount mismatch');
+      if (inv.customerId !== input.customerId) {
+        throw new Error(`Invoice ${inv.documentNumber} does not belong to this customer`);
       }
-      return { payment: duplicate, warning, isDuplicate: true };
-    }
-
-    // 6. If confirmed receipt and allocations provided, apply them
-    if (
-      initialStatus === 'confirmed' &&
-      kind === 'receipt' &&
-      input.allocations &&
-      input.allocations.length > 0
-    ) {
-      const totalToAllocate = input.allocations.reduce(
-        (sum, a) => sum + Number(a.amountMinor),
-        0,
-      );
-      if (totalToAllocate > amountMinor) {
+      if (inv.documentType !== 'invoice' || inv.status !== 'issued') {
         throw new Error(
-          `Allocations total (${totalToAllocate}) exceeds payment amount (${amountMinor})`,
+          `Invoice ${inv.documentNumber} is not an issued invoice (status: ${inv.status})`,
         );
       }
 
-      // Sort invoice IDs ASC to lock invoices deterministically
-      const invoiceIds = [...new Set(input.allocations.map((a) => a.invoiceId))].sort();
-
-      const invoices = await tx
-        .select()
-        .from(salesDocuments)
-        .where(inArray(salesDocuments.id, invoiceIds))
-        .orderBy(asc(salesDocuments.id))
-        .for('update');
-
-      const invoiceMap = new Map(invoices.map((inv) => [inv.id, inv]));
-
-      for (const alloc of input.allocations) {
-        const inv = invoiceMap.get(alloc.invoiceId);
-        if (!inv) {
-          throw new Error(`Invoice ${alloc.invoiceId} not found`);
-        }
-        if (inv.customerId !== input.customerId) {
-          throw new Error(`Invoice ${inv.documentNumber} does not belong to this customer`);
-        }
-        if (inv.documentType !== 'invoice' || inv.status !== 'issued') {
-          throw new Error(
-            `Invoice ${inv.documentNumber} is not an issued invoice (status: ${inv.status})`,
-          );
-        }
-
-        const allocMinor = Number(alloc.amountMinor);
-        if (allocMinor <= 0) {
-          throw new Error('Allocation amount must be greater than zero');
-        }
-
-        const netInvoiceBalance =
-          Number(inv.totalMinor) - Number(inv.creditedMinor) - Number(inv.paidMinor);
-        if (allocMinor > netInvoiceBalance) {
-          throw new Error(
-            `Allocation ${allocMinor} exceeds remaining balance ${netInvoiceBalance} on invoice ${inv.documentNumber}`,
-          );
-        }
-
-        await tx.insert(paymentAllocations).values({
-          paymentId: inserted.id,
-          invoiceId: inv.id,
-          amountMinor: allocMinor,
-          allocatedBy: userId ?? null,
-        });
-
-        await recomputeInvoiceBalances(tx, inv.id);
+      const allocMinor = Number(alloc.amountMinor);
+      if (allocMinor <= 0) {
+        throw new Error('Allocation amount must be greater than zero');
       }
+
+      const netInvoiceBalance =
+        Number(inv.totalMinor) - Number(inv.creditedMinor) - Number(inv.paidMinor);
+      if (allocMinor > netInvoiceBalance) {
+        throw new Error(
+          `Allocation ${allocMinor} exceeds remaining balance ${netInvoiceBalance} on invoice ${inv.documentNumber}`,
+        );
+      }
+
+      await tx.insert(paymentAllocations).values({
+        paymentId: inserted.id,
+        invoiceId: inv.id,
+        amountMinor: allocMinor,
+        allocatedBy: userId ?? null,
+      });
+
+      await recomputeInvoiceBalances(tx, inv.id);
     }
+  }
 
-    // 7. Audit log
-    await writeAuditLog(tx, {
-      userId,
-      action: 'payment.record',
-      entityType: 'payment',
-      entityId: inserted.id,
-      after: {
-        paymentNumber: inserted.paymentNumber,
-        method: inserted.method,
-        amountMinor: inserted.amountMinor,
-        status: inserted.status,
-      },
-    });
+  // 7. Audit log
+  await writeAuditLog(tx, {
+    userId,
+    action: 'payment.record',
+    entityType: 'payment',
+    entityId: inserted.id,
+    after: {
+      paymentNumber: inserted.paymentNumber,
+      method: inserted.method,
+      amountMinor: inserted.amountMinor,
+      status: inserted.status,
+    },
+  });
 
-    return { payment: inserted, warning };
+  return { payment: inserted, warning };
+}
+
+export async function recordPayment(
+  input: RecordPaymentInput,
+  userId?: string,
+): Promise<RecordPaymentResult> {
+  return await db.transaction(async (tx) => {
+    return await recordPaymentWithTx(tx, input, userId);
   });
 }
 
@@ -838,6 +870,11 @@ export async function reversePayment(paymentId: string, reason: string, userId?:
     // 1. Read payment
     const [pmt] = await tx.select().from(payments).where(eq(payments.id, paymentId));
     if (!pmt) throw new Error(`Payment ${paymentId} not found`);
+    if (pmt.shiftId) {
+      throw new Error(
+        'Payments recorded on a POS shift cannot be reversed directly; use the counter return flow',
+      );
+    }
     if (pmt.status !== 'confirmed') {
       throw new Error(`Cannot reverse payment with status '${pmt.status}'`);
     }
@@ -967,8 +1004,8 @@ export async function refundPayment(
     }
 
     // 3. Number sequence
-    const paymentNumber = await getNextDocNumber(tx, 'payment', input.locationId);
-    const todayStr = new Date().toISOString().split('T')[0] ?? '';
+    const paymentNumber = await nextSequenceNumber(tx, 'payment', input.locationId);
+    const todayStr = todayInCompanyTz();
 
     const [refund] = await tx
       .insert(payments)

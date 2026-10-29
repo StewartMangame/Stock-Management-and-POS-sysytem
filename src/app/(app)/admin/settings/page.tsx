@@ -23,6 +23,8 @@ const SETTING_META: Record<SettingKey, { label: string; description: string; typ
   eis_enabled:                          { label: 'Enable MRA EIS',                       description: 'Submit invoices to MRA Electronic Invoicing System',       type: 'boolean' },
   invoice_payment_instructions:         { label: 'Invoice Payment Instructions',         description: 'Bank account and payment details printed at the bottom of invoices', type: 'text' },
   reservation_hold_days:                { label: 'Reservation Hold Days',                description: 'Default days stock reservations are held on acceptance',   type: 'number' },
+  pos_blind_cash_up:                    { label: 'Blind Cash-Up',                        description: 'Hide expected cash and sales totals from cashiers during shift close', type: 'boolean' },
+  pos_return_window_days:               { label: 'POS Return Window (Days)',             description: 'Maximum days allowed for customer returns without manager approval', type: 'number' },
 };
 
 export default async function SettingsPage() {
@@ -38,6 +40,10 @@ export default async function SettingsPage() {
     {
       title: 'Company Information',
       keys: ['company_name', 'company_address', 'company_phone', 'company_email', 'company_tax_number'] as SettingKey[],
+    },
+    {
+      title: 'Point of Sale (POS)',
+      keys: ['pos_blind_cash_up', 'pos_return_window_days'] as SettingKey[],
     },
     {
       title: 'Sales & Tax',
