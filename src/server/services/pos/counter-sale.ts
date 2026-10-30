@@ -27,6 +27,8 @@ import {
   serialNumbers,
   taxRates,
   posShifts,
+  payments,
+  paymentAllocations,
 } from '@/server/db/schema';
 import { eq, and, sql, inArray } from 'drizzle-orm';
 import { executeStockMovements } from '@/server/services/stock/stock-engine';
@@ -63,6 +65,8 @@ export interface CounterSalePaymentInput {
   /** For cash: amount actually tendered by customer (>= appliedMinor). */
   tenderedMinor?: number;
   methodDetails?: Record<string, unknown>;
+  /** Optional pre-authorized payment in awaiting_sale status (e.g. mobile money prompt) */
+  existingPaymentId?: string;
 }
 
 export interface CreateCounterSaleInput {
@@ -759,23 +763,84 @@ export async function createCounterSale(
         methodDetails = { ...methodDetails, tendered_minor: tendered, change_minor: change };
       }
 
-      const result = await recordPaymentWithTx(
-        tx,
-        {
-          idempotencyKey: paymentKey,
-          customerId: resolvedCustomerId!,
-          locationId: input.locationId,
-          shiftId: input.shiftId,
-          kind: 'receipt',
-          method: pmt.method,
-          amountMinor: pmt.appliedMinor,
-          paymentDate: today,
-          methodDetails,
-          allocations: [{ invoiceId: invoice!.id, amountMinor: pmt.appliedMinor }],
-        },
-        userId,
-      );
-      paymentResults.push(result);
+      if (pmt.existingPaymentId) {
+        // Lock existing payment FOR UPDATE
+        const [existingPmt] = await tx
+          .select()
+          .from(payments)
+          .where(eq(payments.id, pmt.existingPaymentId))
+          .for('update');
+
+        if (!existingPmt) {
+          throw new Error(`Pre-authorized payment '${pmt.existingPaymentId}' not found.`);
+        }
+        if (existingPmt.status !== 'awaiting_sale') {
+          throw new Error(
+            `Payment '${pmt.existingPaymentId}' cannot be consumed: status is '${existingPmt.status}' (expected 'awaiting_sale').`,
+          );
+        }
+        if (existingPmt.amountMinor < pmt.appliedMinor) {
+          throw new Error(
+            `Payment '${pmt.existingPaymentId}' amount (${existingPmt.amountMinor}) is less than applied amount (${pmt.appliedMinor}).`,
+          );
+        }
+
+        // Transition from awaiting_sale -> confirmed
+        const [confirmedPmt] = await tx
+          .update(payments)
+          .set({
+            status: 'confirmed',
+            confirmedAt: getNow(),
+            shiftId: input.shiftId,
+            updatedAt: getNow(),
+          })
+          .where(eq(payments.id, existingPmt.id))
+          .returning();
+
+        // Insert allocation linking to this invoice
+        const [alloc] = await tx
+          .insert(paymentAllocations)
+          .values({
+            paymentId: confirmedPmt!.id,
+            invoiceId: invoice!.id,
+            amountMinor: pmt.appliedMinor,
+            allocatedBy: userId,
+            notes: `Counter sale invoice ${invoiceNumber}`,
+          })
+          .returning();
+
+        // Update invoice paidMinor and balanceMinor
+        await tx
+          .update(salesDocuments)
+          .set({
+            paidMinor: sql`${salesDocuments.paidMinor} + ${pmt.appliedMinor}`,
+            balanceMinor: sql`${salesDocuments.balanceMinor} - ${pmt.appliedMinor}`,
+            updatedAt: getNow(),
+          })
+          .where(eq(salesDocuments.id, invoice!.id));
+
+        paymentResults.push({
+          payment: confirmedPmt!,
+        });
+      } else {
+        const result = await recordPaymentWithTx(
+          tx,
+          {
+            idempotencyKey: paymentKey,
+            customerId: resolvedCustomerId!,
+            locationId: input.locationId,
+            shiftId: input.shiftId,
+            kind: 'receipt',
+            method: pmt.method,
+            amountMinor: pmt.appliedMinor,
+            paymentDate: today,
+            methodDetails,
+            allocations: [{ invoiceId: invoice!.id, amountMinor: pmt.appliedMinor }],
+          },
+          userId,
+        );
+        paymentResults.push(result);
+      }
     }
 
     if (input._testInjectFailureAfterPayments) {

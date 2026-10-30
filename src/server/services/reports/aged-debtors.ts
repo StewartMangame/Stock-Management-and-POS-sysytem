@@ -1,32 +1,34 @@
 /**
  * Historical Aged Debtors Report Service.
  *
- * Requirements (Invariant 1):
+ * Requirements (Invariant 1 & Phase 3 Hotfix):
  *   Aged debtors as-of date must be computed from historical records,
  *   not from current balance_minor:
- *   - Invoices issued on or before asOf (status = 'issued', document_type = 'invoice')
+ *   - Invoices issued on or before asOf (status != 'void' OR voided_at > asOfEndOfDay, document_type = 'invoice')
  *   - Minus credit notes issued on or before asOf referencing the invoice
- *   - Minus payment allocations (positive & negative rows) with allocated_at <= asOf
- *   - Void invoices are excluded.
- *   - Fully credited invoices (net balance <= 0 with no net allocations) are excluded.
- *   - Customer credit as-of is computed from receipts, allocations, and refunds on or before asOf.
- *   - A report for a past date does NOT change when new payments/credit notes are recorded after asOf.
+ *   - Minus payment allocations (positive & negative rows) with allocated_at <= asOfEndOfDay
+ *   - Customer credit as-of is computed from receipts (confirmed_at <= asOf), refunds (confirmed_at <= asOf),
+ *     and reversals (reversed_at <= asOf). No payment_status filter.
+ *   - awaiting_sale payments are strictly excluded from AR and customer credit.
  */
 
 import { db } from '@/server/db';
 import {
   salesDocuments,
-  salesDocumentLines,
   paymentAllocations,
   payments,
   customers,
 } from '@/server/db/schema';
-import { eq, and, sql, lte, asc, inArray } from 'drizzle-orm';
+import { eq, and, sql, lte, asc, inArray, isNotNull, ne } from 'drizzle-orm';
 import {
   ageInvoiceBucket,
   computeCustomerCreditAsOf,
   type AgedBucketName,
 } from '@/lib/payment-math';
+import {
+  todayInCompanyTz,
+  endOfDayInCompanyTz,
+} from '@/lib/timezone';
 
 export interface CustomerAgedInvoice {
   invoiceId: string;
@@ -77,16 +79,19 @@ export async function getAgedDebtors(
   asOfInput: Date | string,
   locationId?: string,
 ): Promise<AgedDebtorsReport> {
-  const asOfDate = typeof asOfInput === 'string' ? new Date(asOfInput) : asOfInput;
-  const asOfDateStr = asOfDate.toISOString().split('T')[0] ?? '';
-  // End of the asOf day in UTC
-  const asOfEndOfDay = new Date(`${asOfDateStr}T23:59:59.999Z`);
+  const asOfDateStr =
+    typeof asOfInput === 'string'
+      ? asOfInput.split('T')[0]!
+      : todayInCompanyTz(asOfInput);
+  const asOfDate = new Date(`${asOfDateStr}T00:00:00+02:00`);
+  const asOfEndOfDay = endOfDayInCompanyTz(asOfDateStr);
 
-  // 1. Fetch issued, non-void invoices with issue_date <= asOfDateStr
+  // 1. Fetch valid invoices with issue_date <= asOfDateStr (respecting voided_at)
   const invoiceConditions = [
     eq(salesDocuments.documentType, 'invoice'),
-    eq(salesDocuments.status, 'issued'),
+    ne(salesDocuments.status, 'draft'),
     lte(salesDocuments.issueDate, asOfDateStr),
+    sql`(${salesDocuments.status} != 'void' OR ${salesDocuments.voidedAt} > ${asOfEndOfDay})`,
   ];
 
   if (locationId) {
@@ -154,16 +159,15 @@ export async function getAgedDebtors(
   }
 
   // 4. Calculate historical customer credit as-of asOfDateStr
-  // Fetch all customers involved (or all active customers)
   const customerMap = new Map<string, typeof customers.$inferSelect>();
   for (const r of invoices) {
     customerMap.set(r.customer.id, r.customer);
   }
 
-  // Calculate customer credit for each customer as-of
+  // Calculate customer credit for each customer as-of (excluding awaiting_sale)
   const customerCreditMap = new Map<string, number>();
   for (const customerId of customerMap.keys()) {
-    // Confirmed receipts on or before asOfDateStr
+    // Confirmed receipts on or before asOfEndOfDay
     const [receiptsRes] = await db
       .select({
         total: sql<string>`COALESCE(SUM(${payments.amountMinor}), 0)`,
@@ -173,12 +177,27 @@ export async function getAgedDebtors(
         and(
           eq(payments.customerId, customerId),
           eq(payments.kind, 'receipt'),
-          eq(payments.status, 'confirmed'),
-          lte(payments.paymentDate, asOfDateStr),
+          ne(payments.status, 'awaiting_sale'),
+          isNotNull(payments.confirmedAt),
+          lte(payments.confirmedAt, asOfEndOfDay),
         ),
       );
 
-    // Confirmed refunds on or before asOfDateStr
+    // Reversals on or before asOfEndOfDay
+    const [reversalsRes] = await db
+      .select({
+        total: sql<string>`COALESCE(SUM(${payments.amountMinor}), 0)`,
+      })
+      .from(payments)
+      .where(
+        and(
+          eq(payments.customerId, customerId),
+          isNotNull(payments.reversedAt),
+          lte(payments.reversedAt, asOfEndOfDay),
+        ),
+      );
+
+    // Confirmed refunds on or before asOfEndOfDay
     const [refundsRes] = await db
       .select({
         total: sql<string>`COALESCE(SUM(${payments.amountMinor}), 0)`,
@@ -188,8 +207,9 @@ export async function getAgedDebtors(
         and(
           eq(payments.customerId, customerId),
           eq(payments.kind, 'refund'),
-          eq(payments.status, 'confirmed'),
-          lte(payments.paymentDate, asOfDateStr),
+          ne(payments.status, 'awaiting_sale'),
+          isNotNull(payments.confirmedAt),
+          lte(payments.confirmedAt, asOfEndOfDay),
         ),
       );
 
@@ -204,12 +224,16 @@ export async function getAgedDebtors(
         and(
           eq(payments.customerId, customerId),
           eq(payments.kind, 'receipt'),
-          eq(payments.status, 'confirmed'),
+          ne(payments.status, 'awaiting_sale'),
+          isNotNull(payments.confirmedAt),
           lte(paymentAllocations.allocatedAt, asOfEndOfDay),
         ),
       );
 
-    const receipts = BigInt(receiptsRes?.total ?? '0');
+    const rawReceipts = BigInt(receiptsRes?.total ?? '0');
+    const rawReversals = BigInt(reversalsRes?.total ?? '0');
+    const receipts = rawReceipts > rawReversals ? rawReceipts - rawReversals : BigInt(0);
+
     const refunds = BigInt(refundsRes?.total ?? '0');
     const allocs = BigInt(allocsRes?.total ?? '0');
 

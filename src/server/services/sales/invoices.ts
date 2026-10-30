@@ -82,8 +82,12 @@ export async function createDirectInvoice(input: CreateInvoiceInput, userId?: st
 
   // 4. Fetch tax rates
   const taxRateIds = Array.from(
-    new Set(input.lines.map((l) => l.taxRateId || defaultTaxRate.id)),
-  );
+    new Set(
+      input.lines
+        .map((l) => l.taxRateId || productMap.get(l.productId)?.taxRateId || defaultTaxRate.id)
+        .filter(Boolean),
+    ),
+  ) as string[];
   const fetchedTaxRates = await db
     .select()
     .from(taxRates)

@@ -41,7 +41,14 @@ export const authConfig: NextAuthConfig = {
         nextUrl.pathname.startsWith('/brand') ||
         nextUrl.pathname === '/favicon.ico';
 
-      if (isPublicAsset || isApiAuthRoute) return true;
+      // Public payment link pages, payment link API, and provider webhooks — no auth required
+      const isPublicPayRoute = nextUrl.pathname.startsWith('/pay/');
+      const isPublicPayApi = nextUrl.pathname.startsWith('/api/pay/');
+      const isWebhookRoute = nextUrl.pathname.startsWith('/api/webhooks/');
+
+      if (isPublicAsset || isApiAuthRoute || isPublicPayRoute || isPublicPayApi || isWebhookRoute) {
+        return true;
+      }
 
       if (!isAuthenticated && !isAuthRoute) return false; // redirect to /login
 

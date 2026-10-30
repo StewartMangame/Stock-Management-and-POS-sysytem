@@ -26,6 +26,7 @@ import {
 } from '@/server/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { getAllSettings } from '@/server/services/settings';
+import { getEisReceiptData } from '@/server/services/integrations/eis/queue';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -92,6 +93,13 @@ export interface ReceiptData {
 
   // Optional shift info
   shiftNumber?: string;
+
+  // EIS Fiscal Info (Phase 5)
+  eis?: {
+    receiptNumber: string;
+    deviceSerialNumber: string;
+    qrCodeData: string;
+  } | null;
 
   // Footer
   footerNote?: string;
@@ -241,6 +249,7 @@ export async function buildReceiptData(
 
   // ── Assemble result ─────────────────────────────────────────────────────────
   const saleDateTime = doc.clientCreatedAt?.toISOString() ?? doc.createdAt.toISOString();
+  const eisReceipt = await getEisReceiptData(doc.id).catch(() => null);
 
   return {
     companyName,
@@ -265,6 +274,7 @@ export async function buildReceiptData(
     payments: receiptPayments,
     changeMinor: totalChangeMinor,
     shiftNumber,
+    eis: eisReceipt,
     footerNote,
   };
 }
@@ -442,6 +452,18 @@ export function renderReceiptHtml(data: ReceiptData): string {
   <hr>
   <div class="bold">Payment</div>
   <table>${paymentsHtml}</table>
+  ${data.eis ? `
+  <hr>
+  <div class="center bold" style="font-size:10px;">MRA FISCAL RECEIPT</div>
+  <table>
+    <tr><td>Fiscal Receipt #:</td><td class="amount bold">${escapeHtml(data.eis.receiptNumber)}</td></tr>
+    <tr><td>Device S/N:</td><td class="amount">${escapeHtml(data.eis.deviceSerialNumber)}</td></tr>
+  </table>
+  <div class="center" style="margin-top:4px; font-size:9px;">
+    <div>Verification Link:</div>
+    <div style="word-break:break-all; font-family:monospace; font-size:8px;">${escapeHtml(data.eis.qrCodeData)}</div>
+  </div>
+  ` : ''}
   <hr>
   <div class="center footer">
     ${data.footerNote ? `<div>${escapeHtml(data.footerNote)}</div>` : ''}

@@ -70,7 +70,7 @@ export const payments = pgTable(
     method: text('method').notNull(),
     currency: char('currency', { length: 3 }).notNull().default('MWK'),
     amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
-    /** 'pending' | 'confirmed' | 'failed' | 'reversed' */
+    /** 'pending' | 'awaiting_sale' | 'confirmed' | 'failed' | 'reversed' */
     status: text('status').notNull().default('pending'),
     /** 'not_required' | 'unreconciled' | 'reconciled' */
     reconciliationStatus: text('reconciliation_status').notNull().default('not_required'),
@@ -78,7 +78,16 @@ export const payments = pgTable(
     methodDetails: jsonb('method_details').notNull().default(sql`'{}'::jsonb`),
     /** Cheque intended allocations stored while pending: [{ invoiceId, amountMinor }] */
     intendedAllocations: jsonb('intended_allocations'),
+    provider: text('provider'),
+    providerStatus: text('provider_status'),
     providerReference: text('provider_reference'),
+    providerConfirmedAt: timestamp('provider_confirmed_at', { withTimezone: true }),
+    providerFeeMinor: bigint('provider_fee_minor', { mode: 'number' }).notNull().default(0),
+    providerNetMinor: bigint('provider_net_minor', { mode: 'number' }),
+    flagType: text('flag_type'),
+    flagReason: text('flag_reason'),
+    flaggedAt: timestamp('flagged_at', { withTimezone: true }),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
     reversedAt: timestamp('reversed_at', { withTimezone: true }),
     reversedBy: uuid('reversed_by').references(() => users.id, { onDelete: 'set null' }),
     reversalReason: text('reversal_reason'),
@@ -94,6 +103,9 @@ export const payments = pgTable(
   (t) => [
     index('payments_customer_idx').on(t.customerId),
     index('payments_status_idx').on(t.status),
+    index('payments_confirmed_at_idx').on(t.confirmedAt),
+    index('payments_provider_confirmed_at_idx').on(t.providerConfirmedAt),
+    index('payments_provider_ref_idx').on(t.provider, t.providerReference),
     index('payments_method_idx').on(t.method),
     index('payments_date_idx').on(t.paymentDate),
     index('payments_recon_idx').on(t.reconciliationStatus),

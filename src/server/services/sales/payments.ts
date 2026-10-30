@@ -32,7 +32,7 @@ import {
   type PaymentKind,
 } from '@/lib/payment-math';
 import { nextSequenceNumber } from '@/server/services/sequences';
-import { todayInCompanyTz } from '@/lib/timezone';
+import { todayInCompanyTz, getNow } from '@/lib/timezone';
 import { writeAuditLog } from '@/server/services/audit';
 
 export type Payment = typeof payments.$inferSelect;
@@ -344,6 +344,7 @@ export async function recordPaymentWithTx(
       methodDetails: validatedDetails,
       intendedAllocations,
       providerReference: input.providerReference ?? null,
+      confirmedAt: initialStatus === 'confirmed' ? getNow() : null,
       paymentDate: paymentDateStr,
       notes: input.notes ?? null,
       createdBy: userId ?? null,
@@ -516,8 +517,9 @@ export async function confirmCheque(paymentId: string, userId?: string) {
       .update(payments)
       .set({
         status: 'confirmed',
+        confirmedAt: getNow(),
         reconciliationStatus: 'unreconciled',
-        updatedAt: new Date(),
+        updatedAt: getNow(),
       })
       .where(eq(payments.id, paymentId))
       .returning();
@@ -1107,10 +1109,10 @@ export async function releaseOverpaymentToCredit(
     const paid = Number(inv.paidMinor);
 
     if (paid > netTotal) {
-      const excess = paid - Math.max(0, netTotal);
+      let excessToRelease = paid - Math.max(0, netTotal);
 
-      // Find the latest positive allocation for this invoice
-      const [latestAlloc] = await tx
+      // Find all positive allocations for this invoice ordered by allocatedAt DESC (LIFO)
+      const allocs = await tx
         .select()
         .from(paymentAllocations)
         .where(
@@ -1119,28 +1121,53 @@ export async function releaseOverpaymentToCredit(
             sql`${paymentAllocations.amountMinor} > 0`,
           ),
         )
-        .orderBy(desc(paymentAllocations.allocatedAt))
-        .limit(1);
+        .orderBy(desc(paymentAllocations.allocatedAt));
 
-      if (latestAlloc) {
-        await tx.insert(paymentAllocations).values({
-          paymentId: latestAlloc.paymentId,
-          invoiceId,
-          amountMinor: -excess,
-          allocatedBy: userId ?? null,
-          notes: 'Excess paid released to customer credit due to credit note',
-        });
+      // Calculate current net allocation per payment for this invoice
+      const netAllocByPayment = new Map<string, number>();
+      const allInvoiceAllocs = await tx
+        .select({
+          paymentId: paymentAllocations.paymentId,
+          amountMinor: paymentAllocations.amountMinor,
+        })
+        .from(paymentAllocations)
+        .where(eq(paymentAllocations.invoiceId, invoiceId));
 
-        await recomputeInvoiceBalances(tx, invoiceId);
-
-        await writeAuditLog(tx, {
-          userId,
-          action: 'invoice.release_overpayment',
-          entityType: 'sales_document',
-          entityId: invoiceId,
-          after: { excessReleasedMinor: excess },
-        });
+      for (const a of allInvoiceAllocs) {
+        const cur = netAllocByPayment.get(a.paymentId) ?? 0;
+        netAllocByPayment.set(a.paymentId, cur + Number(a.amountMinor));
       }
+
+      // De-allocate from most recent allocations first
+      for (const alloc of allocs) {
+        if (excessToRelease <= 0) break;
+        const availableOnPair = netAllocByPayment.get(alloc.paymentId) ?? 0;
+        if (availableOnPair <= 0) continue;
+
+        const releaseFromThis = Math.min(excessToRelease, availableOnPair);
+        if (releaseFromThis > 0) {
+          await tx.insert(paymentAllocations).values({
+            paymentId: alloc.paymentId,
+            invoiceId,
+            amountMinor: -releaseFromThis,
+            allocatedBy: userId ?? null,
+            notes: 'Excess paid released to customer credit due to credit note',
+          });
+
+          netAllocByPayment.set(alloc.paymentId, availableOnPair - releaseFromThis);
+          excessToRelease -= releaseFromThis;
+        }
+      }
+
+      await recomputeInvoiceBalances(tx, invoiceId);
+
+      await writeAuditLog(tx, {
+        userId,
+        action: 'invoice.release_overpayment',
+        entityType: 'sales_document',
+        entityId: invoiceId,
+        after: { excessReleasedMinor: paid - Math.max(0, netTotal) },
+      });
     }
   };
 
