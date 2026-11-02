@@ -1,29 +1,35 @@
 /**
- * Customer Statement Service.
+ * Customer Statement Report Service.
  *
- * Implements:
- *   - Historical opening balance as of (from - 1 day)
- *   - Chronological transactions within period:
- *       - Invoices (debit full total)
- *       - Credit Notes (credit full total)
- *       - Confirmed Receipts (credit full amount, deposits included)
- *       - Confirmed Refunds (debit full amount)
- *       - Reversals (debit reversed amount on reversal date)
- *   - Running balance computation
- *   - Closing balance = Opening balance + period debits - period credits
- *   - Mathematical invariant:
- *       Closing Balance === Aged Debtors Total(to) - Customer Credit(to)
+ * Computes historical customer statements and running balances as of any date.
+ *
+ * Hotfix Rules (Phase 3):
+ *   - Uses confirmed_at / reversed_at / voided_at for all point-in-time state.
+ *   - No payment_status filter: queries strictly by point-in-time timestamps.
+ *   - Statement lines contain pure document transactions:
+ *       1. Invoices on issue_date
+ *       2. Credit notes on issue_date
+ *       3. Receipts on confirmed_at date
+ *       4. Reversals as debit lines on reversed_at date
+ *       5. Refunds on confirmed_at date
+ *     NO allocation rows appear in statement lines.
+ *   - awaiting_sale payments are strictly excluded.
  */
 
 import { db } from '@/server/db';
 import {
+  customers,
   salesDocuments,
   payments,
   paymentAllocations,
-  customers,
 } from '@/server/db/schema';
-import { eq, and, sql, lte, gte, asc } from 'drizzle-orm';
+import { eq, and, sql, gte, lte, asc, isNotNull, ne } from 'drizzle-orm';
 import { computeCustomerCreditAsOf } from '@/lib/payment-math';
+import {
+  todayInCompanyTz,
+  startOfDayInCompanyTz,
+  endOfDayInCompanyTz,
+} from '@/lib/timezone';
 
 export interface StatementLine {
   id: string;
@@ -66,7 +72,7 @@ function toIsoDate(d: Date | string): string {
 /**
  * Computes historical customer net balance as of a given date:
  * Net Balance = (Issued Invoices <= asOf - Credit Notes <= asOf)
- *             - (Confirmed Receipts <= asOf)
+ *             - (Confirmed Receipts <= asOf - Reversals <= asOf)
  *             + (Confirmed Refunds <= asOf)
  * Equals: Aged Debtors Total(asOf) - Customer Credit(asOf).
  */
@@ -78,9 +84,9 @@ export async function getCustomerNetBalanceAsOf(
   agedDebtorsTotalMinor: number;
   customerCreditMinor: number;
 }> {
-  const asOfEndOfDay = new Date(`${asOfDateStr}T23:59:59.999Z`);
+  const asOfEndOfDay = endOfDayInCompanyTz(asOfDateStr);
 
-  // 1. Invoices on or before asOfDateStr
+  // 1. Invoices issued on or before asOfDateStr, respecting voided_at
   const [invoicesRes] = await db
     .select({
       total: sql<string>`COALESCE(SUM(${salesDocuments.totalMinor}), 0)`,
@@ -90,8 +96,9 @@ export async function getCustomerNetBalanceAsOf(
       and(
         eq(salesDocuments.customerId, customerId),
         eq(salesDocuments.documentType, 'invoice'),
-        eq(salesDocuments.status, 'issued'),
+        ne(salesDocuments.status, 'draft'),
         lte(salesDocuments.issueDate, asOfDateStr),
+        sql`(${salesDocuments.status} != 'void' OR ${salesDocuments.voidedAt} > ${asOfEndOfDay})`,
       ),
     );
 
@@ -124,7 +131,7 @@ export async function getCustomerNetBalanceAsOf(
       ),
     );
 
-  // 4. Confirmed receipts on or before asOfDateStr
+  // 4. Receipts confirmed on or before asOfEndOfDay (excluding awaiting_sale)
   const [receiptsRes] = await db
     .select({
       total: sql<string>`COALESCE(SUM(${payments.amountMinor}), 0)`,
@@ -134,12 +141,27 @@ export async function getCustomerNetBalanceAsOf(
       and(
         eq(payments.customerId, customerId),
         eq(payments.kind, 'receipt'),
-        eq(payments.status, 'confirmed'),
-        lte(payments.paymentDate, asOfDateStr),
+        ne(payments.status, 'awaiting_sale'),
+        isNotNull(payments.confirmedAt),
+        lte(payments.confirmedAt, asOfEndOfDay),
       ),
     );
 
-  // 5. Confirmed refunds on or before asOfDateStr
+  // 5. Reversals on or before asOfEndOfDay
+  const [reversalsRes] = await db
+    .select({
+      total: sql<string>`COALESCE(SUM(${payments.amountMinor}), 0)`,
+    })
+    .from(payments)
+    .where(
+      and(
+        eq(payments.customerId, customerId),
+        isNotNull(payments.reversedAt),
+        lte(payments.reversedAt, asOfEndOfDay),
+      ),
+    );
+
+  // 6. Refunds confirmed on or before asOfEndOfDay
   const [refundsRes] = await db
     .select({
       total: sql<string>`COALESCE(SUM(${payments.amountMinor}), 0)`,
@@ -149,12 +171,13 @@ export async function getCustomerNetBalanceAsOf(
       and(
         eq(payments.customerId, customerId),
         eq(payments.kind, 'refund'),
-        eq(payments.status, 'confirmed'),
-        lte(payments.paymentDate, asOfDateStr),
+        ne(payments.status, 'awaiting_sale'),
+        isNotNull(payments.confirmedAt),
+        lte(payments.confirmedAt, asOfEndOfDay),
       ),
     );
 
-  // 6. Allocations on or before asOfEndOfDay against confirmed receipts
+  // 7. Allocations on or before asOfEndOfDay against confirmed receipts
   const [receiptAllocsRes] = await db
     .select({
       total: sql<string>`COALESCE(SUM(${paymentAllocations.amountMinor}), 0)`,
@@ -165,7 +188,8 @@ export async function getCustomerNetBalanceAsOf(
       and(
         eq(payments.customerId, customerId),
         eq(payments.kind, 'receipt'),
-        eq(payments.status, 'confirmed'),
+        ne(payments.status, 'awaiting_sale'),
+        isNotNull(payments.confirmedAt),
         lte(paymentAllocations.allocatedAt, asOfEndOfDay),
       ),
     );
@@ -174,7 +198,10 @@ export async function getCustomerNetBalanceAsOf(
   const totalCreditNotes = parseInt(creditNotesRes?.total ?? '0', 10);
   const totalInvoiceAllocs = parseInt(allocsRes?.total ?? '0', 10);
 
-  const confirmedReceipts = BigInt(receiptsRes?.total ?? '0');
+  const rawReceipts = BigInt(receiptsRes?.total ?? '0');
+  const rawReversals = BigInt(reversalsRes?.total ?? '0');
+  const confirmedReceipts = rawReceipts > rawReversals ? rawReceipts - rawReversals : BigInt(0);
+
   const confirmedRefunds = BigInt(refundsRes?.total ?? '0');
   const receiptAllocs = BigInt(receiptAllocsRes?.total ?? '0');
 
@@ -213,14 +240,16 @@ export async function getCustomerStatement(
   }
 
   // Calculate opening balance as of (from - 1 day)
-  const fromDate = new Date(`${fromStr}T00:00:00.000Z`);
-  const dayBeforeFromDate = new Date(fromDate.getTime() - 24 * 60 * 60 * 1000);
-  const dayBeforeFromStr = dayBeforeFromDate.toISOString().split('T')[0] ?? '';
+  const fromStartUtc = startOfDayInCompanyTz(fromStr);
+  const toEndUtc = endOfDayInCompanyTz(toStr);
+
+  const dayBeforeFromDate = new Date(fromStartUtc.getTime() - 24 * 60 * 60 * 1000);
+  const dayBeforeFromStr = todayInCompanyTz(dayBeforeFromDate);
 
   const openingStatus = await getCustomerNetBalanceAsOf(customerId, dayBeforeFromStr);
   const openingBalance = openingStatus.netBalanceMinor;
 
-  // Fetch all transactions within [fromStr, toStr]
+  // Fetch transactions within [fromStr, toStr]
   // 1. Invoices
   const invoices = await db
     .select()
@@ -229,9 +258,10 @@ export async function getCustomerStatement(
       and(
         eq(salesDocuments.customerId, customerId),
         eq(salesDocuments.documentType, 'invoice'),
-        eq(salesDocuments.status, 'issued'),
+        ne(salesDocuments.status, 'draft'),
         gte(salesDocuments.issueDate, fromStr),
         lte(salesDocuments.issueDate, toStr),
+        sql`(${salesDocuments.status} != 'void' OR ${salesDocuments.voidedAt} > ${toEndUtc})`,
       ),
     );
 
@@ -249,36 +279,34 @@ export async function getCustomerStatement(
       ),
     );
 
-  // 3. Confirmed Payments (Receipts & Refunds)
+  // 3. Receipts & Refunds confirmed within period (NO status filter; exclude awaiting_sale)
   const periodPayments = await db
     .select()
     .from(payments)
     .where(
       and(
         eq(payments.customerId, customerId),
-        eq(payments.status, 'confirmed'),
-        gte(payments.paymentDate, fromStr),
-        lte(payments.paymentDate, toStr),
+        ne(payments.status, 'awaiting_sale'),
+        isNotNull(payments.confirmedAt),
+        gte(payments.confirmedAt, fromStartUtc),
+        lte(payments.confirmedAt, toEndUtc),
       ),
     );
 
   // 4. Reversed payments where reversed_at is within period
-  const toEndOfDay = new Date(`${toStr}T23:59:59.999Z`);
-  const fromStartOfDay = new Date(`${fromStr}T00:00:00.000Z`);
-
   const reversals = await db
     .select()
     .from(payments)
     .where(
       and(
         eq(payments.customerId, customerId),
-        eq(payments.status, 'reversed'),
-        gte(payments.reversedAt, fromStartOfDay),
-        lte(payments.reversedAt, toEndOfDay),
+        isNotNull(payments.reversedAt),
+        gte(payments.reversedAt, fromStartUtc),
+        lte(payments.reversedAt, toEndUtc),
       ),
     );
 
-  // Assemble unsequenced raw lines
+  // Assemble pure transaction lines (NO allocation rows)
   interface RawLine {
     date: string;
     timestamp: number;
@@ -296,7 +324,7 @@ export async function getCustomerStatement(
     rawLines.push({
       id: inv.id,
       date: inv.issueDate,
-      timestamp: new Date(inv.issueDate).getTime(),
+      timestamp: startOfDayInCompanyTz(inv.issueDate).getTime(),
       reference: inv.documentNumber ?? 'INVOICE',
       type: 'invoice',
       description: 'Invoice',
@@ -309,7 +337,7 @@ export async function getCustomerStatement(
     rawLines.push({
       id: cn.id,
       date: cn.issueDate,
-      timestamp: new Date(cn.issueDate).getTime(),
+      timestamp: startOfDayInCompanyTz(cn.issueDate).getTime(),
       reference: cn.documentNumber ?? 'CREDIT NOTE',
       type: 'credit_note',
       description: 'Credit Note',
@@ -319,11 +347,14 @@ export async function getCustomerStatement(
   }
 
   for (const p of periodPayments) {
+    const paymentDateStr = p.confirmedAt ? todayInCompanyTz(new Date(p.confirmedAt)) : p.paymentDate;
+    const paymentTime = p.confirmedAt ? new Date(p.confirmedAt).getTime() : startOfDayInCompanyTz(paymentDateStr).getTime();
+
     if (p.kind === 'receipt') {
       rawLines.push({
         id: p.id,
-        date: p.paymentDate,
-        timestamp: new Date(p.paymentDate).getTime(),
+        date: paymentDateStr,
+        timestamp: paymentTime,
         reference: p.paymentNumber,
         type: 'receipt',
         description: `Payment Received (${p.method.replace('_', ' ')})`,
@@ -333,8 +364,8 @@ export async function getCustomerStatement(
     } else if (p.kind === 'refund') {
       rawLines.push({
         id: p.id,
-        date: p.paymentDate,
-        timestamp: new Date(p.paymentDate).getTime(),
+        date: paymentDateStr,
+        timestamp: paymentTime,
         reference: p.paymentNumber,
         type: 'refund',
         description: `Customer Refund (${p.method.replace('_', ' ')})`,
@@ -345,11 +376,12 @@ export async function getCustomerStatement(
   }
 
   for (const rev of reversals) {
-    const revDate = rev.reversedAt ? toIsoDate(rev.reversedAt) : rev.paymentDate;
+    const revDate = rev.reversedAt ? todayInCompanyTz(new Date(rev.reversedAt)) : rev.paymentDate;
+    const revTime = rev.reversedAt ? new Date(rev.reversedAt).getTime() : startOfDayInCompanyTz(revDate).getTime();
     rawLines.push({
       id: rev.id + '-rev',
       date: revDate,
-      timestamp: rev.reversedAt ? rev.reversedAt.getTime() : new Date(revDate).getTime(),
+      timestamp: revTime,
       reference: rev.paymentNumber,
       type: 'reversal',
       description: `Payment Reversal: ${rev.reversalReason ?? 'Reversed'}`,
@@ -388,8 +420,6 @@ export async function getCustomerStatement(
     });
   }
 
-  const closingBalance = currentRunning;
-
   return {
     customer: {
       id: customer.id,
@@ -406,7 +436,7 @@ export async function getCustomerStatement(
     },
     generatedAt: new Date().toISOString(),
     openingBalanceMinor: openingBalance,
-    closingBalanceMinor: closingBalance,
+    closingBalanceMinor: currentRunning,
     totalDebitsMinor: totalDebits,
     totalCreditsMinor: totalCredits,
     lines,

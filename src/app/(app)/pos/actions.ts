@@ -32,6 +32,11 @@ import {
   discardHeldSale,
 } from '@/server/services/pos/held-sales';
 import { verifyManagerOverride } from '@/server/services/pos/override';
+import {
+  initiatePosMobileMoneyPrompt,
+  checkPosMobileMoneyStatus,
+  cancelPosMobileMoneyPrompt,
+} from '@/server/services/pos/pos-mobile-money';
 
 /**
  * Returns the currently active (open) shift for the logged-in cashier.
@@ -381,4 +386,48 @@ export async function verifyManagerOverrideAction(input: {
   });
 
   return result;
+}
+
+/**
+ * Initiates an Airtel Money or TNM Mpamba push prompt at the counter.
+ */
+export async function initiatePosMobileMoneyAction(input: {
+  shiftId: string;
+  locationId: string;
+  customerId?: string;
+  method: 'airtel_money' | 'mpamba';
+  phone: string;
+  amountMinor: number;
+}) {
+  const actor = await authorize(PERMISSIONS.POS_ACCESS);
+
+  return await initiatePosMobileMoneyPrompt({
+    shiftId: input.shiftId,
+    locationId: input.locationId,
+    cashierId: actor.id,
+    customerId: input.customerId,
+    method: input.method,
+    phone: input.phone,
+    amountMinor: input.amountMinor,
+  });
+}
+
+/**
+ * Checks the status of a pending POS mobile money push prompt.
+ */
+export async function checkPosMobileMoneyStatusAction(paymentId: string) {
+  await authorize(PERMISSIONS.POS_ACCESS);
+  return await checkPosMobileMoneyStatus(paymentId);
+}
+
+/**
+ * Cancels a pending POS mobile money prompt.
+ */
+export async function cancelPosMobileMoneyAction(input: {
+  paymentId: string;
+  reason: string;
+}) {
+  const actor = await authorize(PERMISSIONS.POS_ACCESS);
+  await cancelPosMobileMoneyPrompt(input.paymentId, input.reason, actor.id);
+  return { success: true };
 }

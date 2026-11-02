@@ -101,6 +101,8 @@ const navGroups: NavItem[] = [
       { label: 'Users', href: '/admin/users' },
       { label: 'App Settings', href: '/admin/settings' },
       { label: 'Locations', href: '/admin/locations' },
+      { label: 'Integrations', href: '/admin/integrations' },
+      { label: 'Exceptions', href: '/admin/exceptions' },
       { label: 'Audit Log', href: '/admin/audit-log' },
     ],
   },
@@ -184,7 +186,7 @@ export function Sidebar() {
       {/* Logo area */}
       <div className="flex h-14 items-center border-b border-ace-band px-4">
         <div className="flex items-center gap-2">
-          {/* Placeholder logo — replace with <Image> when ace-logo.png is supplied */}
+          {/* Placeholder logo â€” replace with <Image> when ace-logo.png is supplied */}
           <div className="flex h-8 w-8 items-center justify-center rounded bg-ace-navy text-xs font-bold text-white">
             A
           </div>
