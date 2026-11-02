@@ -2,17 +2,29 @@
  * Sales Document PDF Generator on Ace Holdings Letterhead.
  *
  * Implements:
- *   - Professional letterhead with navy header band and branding
- *   - Prominent diagonal 'DRAFT' watermark if status === 'draft'
- *   - Formatted currency in MWK tambala
- *   - Detailed lines with SKU, Description, Qty, Unit Price, Tax, and Total
- *   - Payment instructions setting on invoices
- *   - Reserved block for MRA EIS QR Code and reference
- *   - Footer with page numbers and confidentiality note
+ *   - Official Ace Holdings Letterhead matching company quotations exactly
+ *   - Left: ACE HOLDINGS LTD and company address block
+ *   - Right: Official Ace Holdings brand logo
+ *   - Subheader with Quotation title, ADDRESS block, and Document metadata (QUOTATION, DATE, EXPIRATION DATE)
+ *   - Lavender/blue-gray table header bar for line items (PRODUCT/SERVICE, DESCRIPTION, QTY, RATE, AMOUNT)
+ *   - Clean multi-line descriptions and formatted numbers
+ *   - Subtotal, Tax, and large MWK Grand Total
+ *   - TAX SUMMARY breakdown table (RATE, TAX, NET) with MRA VAT Agency @ 17.5%
+ *   - Accepted By / Accepted Date signature blocks
+ *   - Diagonal DRAFT / CANCELLED / EXPIRED watermarks and subtle background emblem
+ *   - Centered page footer ('Page 1 of 1')
  */
 
 import React from 'react';
-import { Document, Page, Text, View, StyleSheet, renderToBuffer } from '@react-pdf/renderer';
+import {
+  Document,
+  Page,
+  Text,
+  View,
+  StyleSheet,
+  Image,
+  renderToBuffer,
+} from '@react-pdf/renderer';
 import { db } from '@/server/db';
 import {
   quotations,
@@ -26,222 +38,393 @@ import {
 } from '@/server/db/schema';
 import { eq, inArray } from 'drizzle-orm';
 import { getAllSettings } from '@/server/services/settings';
+import { ACE_LOGO_DATA_URI } from './assets';
 
 const styles = StyleSheet.create({
   page: {
-    padding: 30,
-    fontSize: 9,
+    paddingTop: 36,
+    paddingBottom: 40,
+    paddingHorizontal: 40,
+    fontSize: 8.5,
     fontFamily: 'Helvetica',
     color: '#1E293B',
-    lineHeight: 1.4,
+    lineHeight: 1.35,
+    backgroundColor: '#FFFFFF',
   },
-  watermark: {
+  draftWatermark: {
     position: 'absolute',
-    top: '35%',
-    left: '15%',
+    top: '38%',
+    left: '14%',
     transform: 'rotate(-45deg)',
-    fontSize: 90,
-    color: 'rgba(226, 232, 240, 0.45)',
+    fontSize: 76,
+    color: 'rgba(203, 213, 225, 0.40)',
     fontWeight: 'bold',
-    letterSpacing: 10,
+    letterSpacing: 8,
     zIndex: -1,
   },
-  headerBand: {
-    backgroundColor: '#0B2545',
-    color: '#FFFFFF',
-    padding: 12,
-    borderRadius: 4,
-    marginBottom: 20,
+  backgroundWatermark: {
+    position: 'absolute',
+    top: '32%',
+    left: '26%',
+    width: 280,
+    opacity: 0.035,
+    zIndex: -2,
+  },
+  // Header
+  header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    marginBottom: 20,
+  },
+  headerLeft: {
+    width: '55%',
   },
   companyName: {
-    fontSize: 18,
+    fontSize: 11,
     fontWeight: 'bold',
-    letterSpacing: 1,
-    color: '#FFFFFF',
+    color: '#0F172A',
+    marginBottom: 2,
+    letterSpacing: 0.5,
   },
-  companySubtitle: {
-    fontSize: 8,
-    color: '#94A3B8',
+  companyLine: {
+    fontSize: 8.5,
+    color: '#334155',
+    lineHeight: 1.3,
   },
-  docTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#C9A227', // Ace accent gold
-    textAlign: 'right',
+  headerRight: {
+    width: '40%',
+    alignItems: 'flex-end',
   },
-  docNumber: {
-    fontSize: 10,
-    color: '#FFFFFF',
-    textAlign: 'right',
+  logo: {
+    width: 140,
+    height: 84,
+    objectFit: 'contain',
   },
-  metaGrid: {
+  // Subheader
+  titleMetaSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    alignItems: 'flex-start',
+    marginBottom: 16,
+    marginTop: 4,
   },
-  metaColumn: {
-    width: '48%',
+  titleAddressCol: {
+    width: '52%',
   },
-  metaHeading: {
-    fontSize: 9,
+  docTitle: {
+    fontSize: 20,
+    fontWeight: 'normal',
+    color: '#556885', // That distinct slate blue-gray from the reference PDF
+    marginBottom: 12,
+  },
+  addressBlock: {
+    marginTop: 2,
+  },
+  addressLabel: {
+    fontSize: 7.5,
     fontWeight: 'bold',
-    color: '#0B2545',
-    borderBottomWidth: 1,
-    borderBottomColor: '#CBD5E1',
-    paddingBottom: 2,
-    marginBottom: 4,
-    textTransform: 'uppercase',
+    color: '#94A3B8',
+    letterSpacing: 0.5,
+    marginBottom: 3,
+  },
+  customerName: {
+    fontSize: 9.5,
+    fontWeight: 'medium',
+    color: '#0F172A',
+  },
+  customerAddress: {
+    fontSize: 8.5,
+    color: '#475569',
+    marginTop: 1,
+  },
+  metaDetailsCol: {
+    width: '44%',
+    alignItems: 'flex-end',
+    paddingTop: 10,
   },
   metaRow: {
     flexDirection: 'row',
-    marginBottom: 2,
+    justifyContent: 'flex-end',
+    marginBottom: 3,
+    width: '100%',
   },
   metaLabel: {
-    width: '35%',
-    color: '#64748B',
     fontSize: 8,
+    fontWeight: 'bold',
+    color: '#94A3B8',
+    textAlign: 'left',
+    width: 110,
   },
   metaValue: {
-    width: '65%',
-    fontWeight: 'medium',
-    fontSize: 8,
+    fontSize: 8.5,
+    color: '#0F172A',
+    textAlign: 'right',
+    width: 90,
   },
+  // Items Table
   table: {
-    marginTop: 10,
-    marginBottom: 15,
+    marginTop: 8,
+    marginBottom: 4,
   },
   tableHeader: {
     flexDirection: 'row',
-    backgroundColor: '#0B2545',
-    color: '#FFFFFF',
-    padding: 5,
+    backgroundColor: '#EAEFF5', // Soft lavender / blue-gray from the reference
+    paddingVertical: 6,
+    paddingHorizontal: 8,
     borderRadius: 2,
+  },
+  colProductServiceHeader: {
+    width: '24%',
+    fontSize: 7.5,
     fontWeight: 'bold',
-    fontSize: 8,
+    color: '#475569',
+  },
+  colDescriptionHeader: {
+    width: '42%',
+    fontSize: 7.5,
+    fontWeight: 'bold',
+    color: '#475569',
+  },
+  colQtyHeader: {
+    width: '8%',
+    fontSize: 7.5,
+    fontWeight: 'bold',
+    color: '#475569',
+    textAlign: 'right',
+  },
+  colRateHeader: {
+    width: '13%',
+    fontSize: 7.5,
+    fontWeight: 'bold',
+    color: '#475569',
+    textAlign: 'right',
+  },
+  colAmountHeader: {
+    width: '13%',
+    fontSize: 7.5,
+    fontWeight: 'bold',
+    color: '#475569',
+    textAlign: 'right',
   },
   tableRow: {
     flexDirection: 'row',
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#E2E8F0',
-    paddingVertical: 5,
-    paddingHorizontal: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  colProductService: {
+    width: '24%',
+    paddingRight: 6,
+  },
+  productNameText: {
+    fontSize: 8.5,
+    fontWeight: 'bold',
+    color: '#0F172A',
+  },
+  skuText: {
+    fontSize: 7,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  colDescription: {
+    width: '42%',
+    paddingRight: 6,
+  },
+  descriptionText: {
     fontSize: 8,
+    color: '#334155',
+    lineHeight: 1.35,
   },
-  tableRowZebra: {
-    backgroundColor: '#F8FAFC',
+  colQty: {
+    width: '8%',
+    textAlign: 'right',
+    fontSize: 8.5,
+    color: '#0F172A',
   },
-  colSku: { width: '15%' },
-  colDesc: { width: '33%' },
-  colQty: { width: '10%', textAlign: 'right' },
-  colUnitPrice: { width: '14%', textAlign: 'right' },
-  colTax: { width: '12%', textAlign: 'right' },
-  colTotal: { width: '16%', textAlign: 'right' },
+  colRate: {
+    width: '13%',
+    textAlign: 'right',
+    fontSize: 8.5,
+    color: '#0F172A',
+  },
+  colAmount: {
+    width: '13%',
+    textAlign: 'right',
+    fontSize: 8.5,
+    color: '#0F172A',
+  },
+  tableDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#CBD5E1',
+    borderBottomStyle: 'dotted',
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  // Totals
   totalsContainer: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    marginTop: 10,
-    marginBottom: 20,
+    marginBottom: 16,
   },
   totalsBox: {
-    width: '45%',
-    backgroundColor: '#F8FAFC',
-    padding: 10,
-    borderRadius: 4,
-    borderWidth: 0.5,
-    borderColor: '#E2E8F0',
+    width: '42%',
   },
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 4,
   },
+  totalLabel: {
+    fontSize: 8,
+    color: '#94A3B8',
+    fontWeight: 'bold',
+  },
+  totalValue: {
+    fontSize: 8.5,
+    color: '#0F172A',
+    textAlign: 'right',
+  },
+  grandTotalDivider: {
+    borderTopWidth: 1,
+    borderTopColor: '#CBD5E1',
+    marginVertical: 4,
+  },
   grandTotalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    borderTopWidth: 1,
-    borderTopColor: '#0B2545',
-    paddingTop: 4,
-    marginTop: 4,
+    alignItems: 'baseline',
+    marginTop: 2,
   },
   grandTotalLabel: {
-    fontSize: 10,
+    fontSize: 8.5,
     fontWeight: 'bold',
-    color: '#0B2545',
+    color: '#64748B',
   },
   grandTotalValue: {
-    fontSize: 10,
+    fontSize: 13,
     fontWeight: 'bold',
-    color: '#0B2545',
+    color: '#0F172A',
+    textAlign: 'right',
   },
-  balanceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: '#FEF3C7',
-    padding: 4,
-    borderRadius: 2,
+  // Tax Summary
+  taxSummarySection: {
     marginTop: 4,
+    marginBottom: 18,
+    width: '100%',
   },
-  balanceLabel: {
-    fontWeight: 'bold',
-    color: '#92400E',
-  },
-  balanceValue: {
-    fontWeight: 'bold',
-    color: '#92400E',
-  },
-  instructionsBox: {
-    padding: 8,
-    backgroundColor: '#F1F5F9',
-    borderRadius: 4,
-    marginBottom: 15,
-  },
-  instructionsTitle: {
+  taxSummaryTitle: {
     fontSize: 8,
     fontWeight: 'bold',
-    color: '#0B2545',
-    marginBottom: 2,
+    color: '#475569',
+    marginBottom: 4,
   },
-  instructionsText: {
+  taxSummaryHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#EAEFF5',
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    borderRadius: 2,
+  },
+  taxSummaryRow: {
+    flexDirection: 'row',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  taxColRate: {
+    width: '40%',
     fontSize: 7.5,
+    fontWeight: 'bold',
     color: '#475569',
   },
-  eisPlaceholderBox: {
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    borderStyle: 'dashed',
-    padding: 8,
-    borderRadius: 4,
-    marginBottom: 15,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  taxColTax: {
+    width: '30%',
+    fontSize: 7.5,
+    fontWeight: 'bold',
+    color: '#475569',
+    textAlign: 'center',
   },
-  eisText: {
+  taxColNet: {
+    width: '30%',
+    fontSize: 7.5,
+    fontWeight: 'bold',
+    color: '#475569',
+    textAlign: 'right',
+  },
+  taxColRateText: {
+    width: '40%',
+    fontSize: 8,
+    color: '#0F172A',
+  },
+  taxColTaxText: {
+    width: '30%',
+    fontSize: 8,
+    color: '#0F172A',
+    textAlign: 'center',
+  },
+  taxColNetText: {
+    width: '30%',
+    fontSize: 8,
+    color: '#0F172A',
+    textAlign: 'right',
+  },
+  // Acceptance
+  acceptanceSection: {
+    marginTop: 6,
+    marginBottom: 16,
+    width: '50%',
+  },
+  acceptanceField: {
+    marginBottom: 14,
+  },
+  acceptanceLabel: {
+    fontSize: 8,
+    color: '#64748B',
+    marginBottom: 8,
+  },
+  acceptanceLine: {
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#CBD5E1',
+    width: 180,
+  },
+  // Notes / Terms / Instructions
+  notesBox: {
+    marginTop: 8,
+    marginBottom: 12,
+    padding: 8,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 3,
+    borderWidth: 0.5,
+    borderColor: '#E2E8F0',
+  },
+  notesTitle: {
+    fontSize: 7.5,
+    fontWeight: 'bold',
+    color: '#475569',
+    marginBottom: 2,
+  },
+  notesContent: {
     fontSize: 7.5,
     color: '#64748B',
   },
+  // Footer
   footer: {
     position: 'absolute',
-    bottom: 20,
-    left: 30,
-    right: 30,
-    borderTopWidth: 0.5,
-    borderTopColor: '#CBD5E1',
-    paddingTop: 6,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    fontSize: 7,
+    bottom: 25,
+    left: 40,
+    right: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerText: {
+    fontSize: 7.5,
     color: '#94A3B8',
   },
 });
 
 export interface SalesDocumentPdfData {
-  title: string; // 'TAX INVOICE' | 'PROFORMA QUOTATION' | 'CREDIT NOTE' | 'DELIVERY NOTE'
+  title: string; // 'Quotation' | 'TAX INVOICE' | 'PROFORMA QUOTATION' | 'CREDIT NOTE' | 'DELIVERY NOTE'
   documentNumber: string;
-  status: string; // 'draft' | 'issued' | 'void'
+  status: string; // 'draft' | 'issued' | 'void' | 'sent' | 'accepted' | 'cancelled' | 'expired'
   date: string;
   dueDate?: string;
   currency: string;
@@ -261,6 +444,7 @@ export interface SalesDocumentPdfData {
   };
   lines: Array<{
     sku: string;
+    productName?: string;
     description?: string;
     quantity: string | number;
     unitPriceMinor: number;
@@ -285,191 +469,274 @@ export interface SalesDocumentPdfData {
   eisReference?: string;
 }
 
-function formatMWK(minor: number): string {
-  return `MWK ${(minor / 100).toLocaleString('en-US', {
+function formatAmount(minor: number): string {
+  return (minor / 100).toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })}`;
+  });
+}
+
+function formatDisplayDate(dateStr?: string | Date): string {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return String(dateStr);
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const year = d.getUTCFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+function getCompanyHeaderLines(company: SalesDocumentPdfData['company']) {
+  let addrLines: string[] = [];
+  if (company.address && company.address.includes('\n')) {
+    addrLines = company.address.split('\n').map((s) => s.trim()).filter(Boolean);
+  } else if (company.address && company.address.includes('Livingstone Avenue')) {
+    addrLines = ['First House', '53 Livingstone Avenue', 'BLANTYRE 3000'];
+  } else if (company.address) {
+    addrLines = [company.address];
+  } else {
+    addrLines = ['First House', '53 Livingstone Avenue', 'BLANTYRE 3000'];
+  }
+
+  const phone = company.phone || '+265999257356';
+  const email = company.email || 'ace@ace.co.mw';
+
+  return {
+    name: 'ACE HOLDINGS LTD',
+    lines: [...addrLines, phone, email],
+  };
 }
 
 export const SalesDocumentPdf: React.FC<{ data: SalesDocumentPdfData }> = ({ data }) => {
+  const isQuotation = data.title.toLowerCase().includes('quotation');
+  const companyInfo = getCompanyHeaderLines(data.company);
+
+  // Status for watermark
   const isDraft = data.status === 'draft';
+  const isCancelled = data.status === 'cancelled';
+  const isExpired = data.status === 'expired';
+
+  // Calculate tax rate label
+  const taxRatePercent =
+    data.totals && data.totals.subtotalMinor > 0
+      ? ((data.totals.taxMinor / data.totals.subtotalMinor) * 100).toFixed(1)
+      : '17.5';
+  const taxRateLabel = `MRA VAT Agency @ ${taxRatePercent}%`;
 
   return (
     <Document>
       <Page size="A4" style={styles.page}>
-        {/* Draft Watermark */}
-        {isDraft && <Text style={styles.watermark}>DRAFT</Text>}
+        {/* Subtle Ace Holdings Logo Background Watermark */}
+        <Image src={ACE_LOGO_DATA_URI} style={styles.backgroundWatermark} />
 
-        {/* Header Band */}
-        <View style={styles.headerBand}>
-          <View>
-            <Text style={styles.companyName}>{data.company.name}</Text>
-            <Text style={styles.companySubtitle}>
-              {data.company.address || 'Victoria Avenue, Blantyre, Malawi'}
-            </Text>
-            <Text style={styles.companySubtitle}>
-              Tel: {data.company.phone || '+265 1 820 000'} | TPIN: {data.company.taxNumber || '10000000'}
-            </Text>
+        {/* Status Watermarks */}
+        {isDraft && <Text style={styles.draftWatermark}>DRAFT</Text>}
+        {isCancelled && (
+          <Text style={[styles.draftWatermark, { color: 'rgba(244, 63, 94, 0.25)' }]}>
+            CANCELLED
+          </Text>
+        )}
+        {isExpired && (
+          <Text style={[styles.draftWatermark, { color: 'rgba(245, 158, 11, 0.25)' }]}>
+            EXPIRED
+          </Text>
+        )}
+
+        {/* Top Header: Company details on left, Logo on right */}
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <Text style={styles.companyName}>{companyInfo.name}</Text>
+            {companyInfo.lines.map((line, idx) => (
+              <Text key={idx} style={styles.companyLine}>
+                {line}
+              </Text>
+            ))}
           </View>
-          <View>
-            <Text style={styles.docTitle}>{data.title}</Text>
-            <Text style={styles.docNumber}>{data.documentNumber || 'UNASSIGNED'}</Text>
+          <View style={styles.headerRight}>
+            <Image src={ACE_LOGO_DATA_URI} style={styles.logo} />
           </View>
         </View>
 
-        {/* Customer & Document Meta */}
-        <View style={styles.metaGrid}>
-          <View style={styles.metaColumn}>
-            <Text style={styles.metaHeading}>Billed To</Text>
-            <View style={styles.metaRow}>
-              <Text style={styles.metaLabel}>Customer:</Text>
-              <Text style={styles.metaValue}>{data.customer.name}</Text>
+        {/* Subheader: Quotation & ADDRESS on left, Metadata on right */}
+        <View style={styles.titleMetaSection}>
+          <View style={styles.titleAddressCol}>
+            <Text style={styles.docTitle}>{isQuotation ? 'Quotation' : data.title}</Text>
+            <View style={styles.addressBlock}>
+              <Text style={styles.addressLabel}>ADDRESS</Text>
+              <Text style={styles.customerName}>{data.customer.name}</Text>
+              {data.customer.address && (
+                <Text style={styles.customerAddress}>{data.customer.address}</Text>
+              )}
             </View>
-            <View style={styles.metaRow}>
-              <Text style={styles.metaLabel}>Account #:</Text>
-              <Text style={styles.metaValue}>{data.customer.accountNumber}</Text>
-            </View>
-            {data.customer.taxNumber && (
-              <View style={styles.metaRow}>
-                <Text style={styles.metaLabel}>TPIN:</Text>
-                <Text style={styles.metaValue}>{data.customer.taxNumber}</Text>
-              </View>
-            )}
-            {data.customer.address && (
-              <View style={styles.metaRow}>
-                <Text style={styles.metaLabel}>Address:</Text>
-                <Text style={styles.metaValue}>{data.customer.address}</Text>
-              </View>
-            )}
           </View>
 
-          <View style={styles.metaColumn}>
-            <Text style={styles.metaHeading}>Document Details</Text>
+          <View style={styles.metaDetailsCol}>
             <View style={styles.metaRow}>
-              <Text style={styles.metaLabel}>Date:</Text>
-              <Text style={styles.metaValue}>{data.date}</Text>
+              <Text style={styles.metaLabel}>
+                {isQuotation ? 'QUOTATION' : data.title.toUpperCase()}
+              </Text>
+              <Text style={styles.metaValue}>{data.documentNumber || 'DRAFT'}</Text>
+            </View>
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabel}>DATE</Text>
+              <Text style={styles.metaValue}>{formatDisplayDate(data.date)}</Text>
             </View>
             {data.dueDate && (
               <View style={styles.metaRow}>
-                <Text style={styles.metaLabel}>Due Date:</Text>
-                <Text style={styles.metaValue}>{data.dueDate}</Text>
+                <Text style={styles.metaLabel}>
+                  {isQuotation ? 'EXPIRATION DATE' : 'DUE DATE'}
+                </Text>
+                <Text style={styles.metaValue}>{formatDisplayDate(data.dueDate)}</Text>
               </View>
             )}
-            <View style={styles.metaRow}>
-              <Text style={styles.metaLabel}>Status:</Text>
-              <Text style={styles.metaValue}>{data.status.toUpperCase()}</Text>
-            </View>
-            <View style={styles.metaRow}>
-              <Text style={styles.metaLabel}>Currency:</Text>
-              <Text style={styles.metaValue}>{data.currency}</Text>
-            </View>
           </View>
         </View>
 
-        {/* Line Items Table */}
+        {/* Products / Services Table */}
         <View style={styles.table}>
           <View style={styles.tableHeader}>
-            <Text style={styles.colSku}>SKU</Text>
-            <Text style={styles.colDesc}>Description</Text>
-            <Text style={styles.colQty}>Qty</Text>
-            <Text style={styles.colUnitPrice}>Unit Price</Text>
-            <Text style={styles.colTax}>VAT</Text>
-            <Text style={styles.colTotal}>Total</Text>
+            <Text style={styles.colProductServiceHeader}>PRODUCT/SERVICE</Text>
+            <Text style={styles.colDescriptionHeader}>DESCRIPTION</Text>
+            <Text style={styles.colQtyHeader}>QTY</Text>
+            <Text style={styles.colRateHeader}>RATE</Text>
+            <Text style={styles.colAmountHeader}>AMOUNT</Text>
           </View>
 
-          {data.lines.map((line, idx) => (
-            <View
-              key={idx}
-              style={[styles.tableRow, idx % 2 === 1 ? styles.tableRowZebra : {}]}
-            >
-              <Text style={styles.colSku}>{line.sku}</Text>
-              <View style={styles.colDesc}>
-                <Text>{line.description || line.sku}</Text>
-                {line.serials && line.serials.length > 0 && (
-                  <Text style={{ fontSize: 6.5, color: '#64748B', marginTop: 2 }}>
-                    S/N: {line.serials.join(', ')}
-                  </Text>
-                )}
+          {data.lines.map((line, idx) => {
+            const prodTitle = line.productName || line.sku;
+            const desc =
+              line.description && line.description !== prodTitle
+                ? line.description
+                : line.description || '';
+
+            return (
+              <View key={idx} style={styles.tableRow}>
+                <View style={styles.colProductService}>
+                  <Text style={styles.productNameText}>{prodTitle}</Text>
+                  {line.sku && line.sku !== prodTitle && (
+                    <Text style={styles.skuText}>SKU: {line.sku}</Text>
+                  )}
+                  {line.serials && line.serials.length > 0 && (
+                    <Text style={{ fontSize: 6.5, color: '#64748B', marginTop: 1 }}>
+                      S/N: {line.serials.join(', ')}
+                    </Text>
+                  )}
+                </View>
+
+                <View style={styles.colDescription}>
+                  <Text style={styles.descriptionText}>{desc}</Text>
+                </View>
+
+                <Text style={styles.colQty}>{line.quantity}</Text>
+                <Text style={styles.colRate}>{formatAmount(line.unitPriceMinor)}</Text>
+                <Text style={styles.colAmount}>{formatAmount(line.lineTotalMinor)}</Text>
               </View>
-              <Text style={styles.colQty}>{line.quantity}</Text>
-              <Text style={styles.colUnitPrice}>{formatMWK(line.unitPriceMinor)}</Text>
-              <Text style={styles.colTax}>{formatMWK(line.taxMinor)}</Text>
-              <Text style={styles.colTotal}>{formatMWK(line.lineTotalMinor)}</Text>
-            </View>
-          ))}
+            );
+          })}
         </View>
 
-        {/* Totals Box */}
+        {/* Dotted divider at bottom of table */}
+        <View style={styles.tableDivider} />
+
+        {/* Totals Section */}
         {data.totals && (
           <View style={styles.totalsContainer}>
             <View style={styles.totalsBox}>
               <View style={styles.totalRow}>
-                <Text style={{ color: '#64748B' }}>Subtotal:</Text>
-                <Text>{formatMWK(data.totals.subtotalMinor)}</Text>
+                <Text style={styles.totalLabel}>SUBTOTAL</Text>
+                <Text style={styles.totalValue}>{formatAmount(data.totals.subtotalMinor)}</Text>
               </View>
               {data.totals.discountMinor > 0 && (
                 <View style={styles.totalRow}>
-                  <Text style={{ color: '#64748B' }}>Discount:</Text>
-                  <Text>-{formatMWK(data.totals.discountMinor)}</Text>
+                  <Text style={styles.totalLabel}>DISCOUNT</Text>
+                  <Text style={styles.totalValue}>-{formatAmount(data.totals.discountMinor)}</Text>
                 </View>
               )}
               <View style={styles.totalRow}>
-                <Text style={{ color: '#64748B' }}>VAT (17.5%):</Text>
-                <Text>{formatMWK(data.totals.taxMinor)}</Text>
-              </View>
-              <View style={styles.grandTotalRow}>
-                <Text style={styles.grandTotalLabel}>Total:</Text>
-                <Text style={styles.grandTotalValue}>{formatMWK(data.totals.totalMinor)}</Text>
+                <Text style={styles.totalLabel}>TAX</Text>
+                <Text style={styles.totalValue}>{formatAmount(data.totals.taxMinor)}</Text>
               </View>
 
-              {data.totals.balanceMinor !== undefined && (
-                <View style={styles.balanceRow}>
-                  <Text style={styles.balanceLabel}>Balance Due:</Text>
-                  <Text style={styles.balanceValue}>{formatMWK(data.totals.balanceMinor)}</Text>
+              <View style={styles.grandTotalDivider} />
+
+              <View style={styles.grandTotalRow}>
+                <Text style={styles.grandTotalLabel}>TOTAL</Text>
+                <Text style={styles.grandTotalValue}>
+                  {data.currency} {formatAmount(data.totals.totalMinor)}
+                </Text>
+              </View>
+
+              {data.totals.balanceMinor !== undefined && data.totals.balanceMinor > 0 && (
+                <View style={[styles.totalRow, { marginTop: 4 }]}>
+                  <Text style={[styles.totalLabel, { color: '#B45309' }]}>BALANCE DUE</Text>
+                  <Text style={[styles.totalValue, { color: '#B45309', fontWeight: 'bold' }]}>
+                    {data.currency} {formatAmount(data.totals.balanceMinor)}
+                  </Text>
                 </View>
               )}
             </View>
           </View>
         )}
 
-        {/* Payment Instructions Setting */}
-        {data.paymentInstructions && (
-          <View style={styles.instructionsBox}>
-            <Text style={styles.instructionsTitle}>Payment Instructions</Text>
-            <Text style={styles.instructionsText}>{data.paymentInstructions}</Text>
+        {/* TAX SUMMARY Section */}
+        {data.totals && (
+          <View style={styles.taxSummarySection}>
+            <Text style={styles.taxSummaryTitle}>TAX SUMMARY</Text>
+            <View style={styles.taxSummaryHeader}>
+              <Text style={styles.taxColRate}>RATE</Text>
+              <Text style={styles.taxColTax}>TAX</Text>
+              <Text style={styles.taxColNet}>NET</Text>
+            </View>
+            <View style={styles.taxSummaryRow}>
+              <Text style={styles.taxColRateText}>{taxRateLabel}</Text>
+              <Text style={styles.taxColTaxText}>{formatAmount(data.totals.taxMinor)}</Text>
+              <Text style={styles.taxColNetText}>{formatAmount(data.totals.subtotalMinor)}</Text>
+            </View>
           </View>
         )}
 
-        {/* EIS Integration Block Placeholder */}
-        <View style={styles.eisPlaceholderBox}>
-          <View>
-            <Text style={{ fontSize: 8, fontWeight: 'bold', color: '#0B2545' }}>
-              MRA Electronic Invoicing System (EIS)
-            </Text>
-            <Text style={styles.eisText}>
-              Status: {data.eisStatus || 'not_required'} | Ref:{' '}
-              {data.eisReference || 'PENDING SUBMISSION'}
-            </Text>
+        {/* Acceptance Section */}
+        <View style={styles.acceptanceSection}>
+          <View style={styles.acceptanceField}>
+            <Text style={styles.acceptanceLabel}>Accepted By</Text>
+            <View style={styles.acceptanceLine} />
           </View>
-          <View
-            style={{
-              width: 40,
-              height: 40,
-              borderWidth: 1,
-              borderColor: '#94A3B8',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Text style={{ fontSize: 6, color: '#94A3B8' }}>QR CODE</Text>
+          <View style={styles.acceptanceField}>
+            <Text style={styles.acceptanceLabel}>Accepted Date</Text>
+            <View style={styles.acceptanceLine} />
           </View>
         </View>
 
-        {/* Footer */}
+        {/* Optional Notes & Terms */}
+        {(data.notes || data.terms || data.paymentInstructions) && (
+          <View style={styles.notesBox}>
+            {data.notes && (
+              <View style={{ marginBottom: 4 }}>
+                <Text style={styles.notesTitle}>Notes</Text>
+                <Text style={styles.notesContent}>{data.notes}</Text>
+              </View>
+            )}
+            {data.terms && (
+              <View style={{ marginBottom: 4 }}>
+                <Text style={styles.notesTitle}>Terms & Conditions</Text>
+                <Text style={styles.notesContent}>{data.terms}</Text>
+              </View>
+            )}
+            {data.paymentInstructions && (
+              <View>
+                <Text style={styles.notesTitle}>Payment Instructions</Text>
+                <Text style={styles.notesContent}>{data.paymentInstructions}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Centered Page Footer */}
         <View style={styles.footer} fixed>
-          <Text>Thank you for choosing {data.company.name}</Text>
-          <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
+          <Text
+            style={styles.footerText}
+            render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`}
+          />
         </View>
       </Page>
     </Document>
@@ -492,11 +759,11 @@ export async function fetchSalesDocumentPdfData(
   const allSettings = await getAllSettings();
 
   const company = {
-    name: (allSettings.company_name as string) || 'Ace Holdings Limited',
-    address: (allSettings.company_address as string) || 'Plot 4/128, Kenyatta Drive, Lilongwe, Malawi',
-    phone: (allSettings.company_phone as string) || '+265 1 750 000',
-    email: (allSettings.company_email as string) || 'info@aceholdings.mw',
-    taxNumber: (allSettings.company_tax_number as string) || 'TPIN: 1002345678',
+    name: (allSettings.company_name as string) || 'ACE HOLDINGS LTD',
+    address: (allSettings.company_address as string) || 'First House\n53 Livingstone Avenue\nBLANTYRE 3000',
+    phone: (allSettings.company_phone as string) || '+265999257356',
+    email: (allSettings.company_email as string) || 'ace@ace.co.mw',
+    taxNumber: (allSettings.company_tax_number as string) || '',
   };
 
   const paymentInstructions = (allSettings.invoice_payment_instructions as string) || undefined;
@@ -506,14 +773,33 @@ export async function fetchSalesDocumentPdfData(
     if (!quote) throw new Error('Quotation not found');
 
     const [cust] = await db.select().from(customers).where(eq(customers.id, quote.customerId));
-    const lines = await db.select().from(quotationLines).where(eq(quotationLines.quotationId, id));
+    const lines = await db
+      .select({
+        id: quotationLines.id,
+        sku: quotationLines.sku,
+        description: quotationLines.description,
+        quantity: quotationLines.quantity,
+        unitPriceMinor: quotationLines.unitPriceMinor,
+        discountMinor: quotationLines.discountMinor,
+        taxMinor: quotationLines.taxMinor,
+        lineTotalMinor: quotationLines.lineTotalMinor,
+        notes: quotationLines.notes,
+        productName: products.name,
+      })
+      .from(quotationLines)
+      .innerJoin(products, eq(quotationLines.productId, products.id))
+      .where(eq(quotationLines.quotationId, id));
 
     return {
-      title: 'PROFORMA QUOTATION',
+      title: 'Quotation',
       documentNumber: quote.quotationNumber || 'DRAFT',
       status: quote.status,
-      date: quote.quotationDate ? new Date(quote.quotationDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-      dueDate: quote.validUntil ? new Date(quote.validUntil).toISOString().slice(0, 10) : undefined,
+      date: quote.quotationDate
+        ? new Date(quote.quotationDate).toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10),
+      dueDate: quote.validUntil
+        ? new Date(quote.validUntil).toISOString().slice(0, 10)
+        : undefined,
       currency: quote.currency || 'MWK',
       company,
       customer: {
@@ -525,7 +811,8 @@ export async function fetchSalesDocumentPdfData(
       },
       lines: lines.map((l) => ({
         sku: l.sku || '',
-        description: l.description || '',
+        productName: l.productName || l.sku || '',
+        description: l.description || l.notes || '',
         quantity: l.quantity,
         unitPriceMinor: l.unitPriceMinor,
         discountMinor: l.discountMinor,
@@ -549,14 +836,32 @@ export async function fetchSalesDocumentPdfData(
     if (!doc) throw new Error(`${documentType} not found`);
 
     const [cust] = await db.select().from(customers).where(eq(customers.id, doc.customerId));
-    const lines = await db.select().from(salesDocumentLines).where(eq(salesDocumentLines.documentId, id));
+    const lines = await db
+      .select({
+        id: salesDocumentLines.id,
+        sku: salesDocumentLines.sku,
+        description: salesDocumentLines.description,
+        quantity: salesDocumentLines.quantity,
+        unitPriceMinor: salesDocumentLines.unitPriceMinor,
+        discountMinor: salesDocumentLines.discountMinor,
+        taxMinor: salesDocumentLines.taxMinor,
+        lineTotalMinor: salesDocumentLines.lineTotalMinor,
+        productName: products.name,
+      })
+      .from(salesDocumentLines)
+      .leftJoin(products, eq(salesDocumentLines.productId, products.id))
+      .where(eq(salesDocumentLines.documentId, id));
 
     return {
       title: doc.documentType === 'credit_note' ? 'CREDIT NOTE' : 'TAX INVOICE',
       documentNumber: doc.documentNumber || 'DRAFT',
       status: doc.status,
-      date: doc.issueDate ? new Date(doc.issueDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-      dueDate: doc.dueDate ? new Date(doc.dueDate).toISOString().slice(0, 10) : undefined,
+      date: doc.issueDate
+        ? new Date(doc.issueDate).toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10),
+      dueDate: doc.dueDate
+        ? new Date(doc.dueDate).toISOString().slice(0, 10)
+        : undefined,
       currency: doc.currency || 'MWK',
       company,
       customer: {
@@ -568,6 +873,7 @@ export async function fetchSalesDocumentPdfData(
       },
       lines: lines.map((l) => ({
         sku: l.sku || '',
+        productName: l.productName || l.sku || '',
         description: l.description || '',
         quantity: l.quantity,
         unitPriceMinor: l.unitPriceMinor,
@@ -596,20 +902,29 @@ export async function fetchSalesDocumentPdfData(
     if (!dn) throw new Error('Delivery note not found');
 
     const [cust] = await db.select().from(customers).where(eq(customers.id, dn.customerId));
-    const [invoice] = await db.select().from(salesDocuments).where(eq(salesDocuments.id, dn.salesDocumentId));
-    const dnLines = await db.select().from(deliveryNoteLines).where(eq(deliveryNoteLines.deliveryNoteId, id));
+    const [invoice] = await db
+      .select()
+      .from(salesDocuments)
+      .where(eq(salesDocuments.id, dn.salesDocumentId));
+    const dnLines = await db
+      .select()
+      .from(deliveryNoteLines)
+      .where(eq(deliveryNoteLines.deliveryNoteId, id));
 
     const productIds = dnLines.map((l) => l.productId);
-    const fetchedProds = productIds.length > 0
-      ? await db.select().from(products).where(inArray(products.id, productIds))
-      : [];
+    const fetchedProds =
+      productIds.length > 0
+        ? await db.select().from(products).where(inArray(products.id, productIds))
+        : [];
     const prodMap = new Map(fetchedProds.map((p) => [p.id, p]));
 
     return {
       title: 'DELIVERY NOTE',
       documentNumber: dn.deliveryNumber || 'DISPATCHED',
       status: dn.status,
-      date: dn.deliveryDate ? new Date(dn.deliveryDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+      date: dn.deliveryDate
+        ? new Date(dn.deliveryDate).toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10),
       currency: invoice?.currency || 'MWK',
       company,
       customer: {
@@ -623,6 +938,7 @@ export async function fetchSalesDocumentPdfData(
         const p = prodMap.get(l.productId);
         return {
           sku: p?.sku || '',
+          productName: p?.name || '',
           description: p?.name || '',
           quantity: l.quantity,
           unitPriceMinor: 0,
@@ -637,4 +953,3 @@ export async function fetchSalesDocumentPdfData(
 
   throw new Error(`Unsupported document type: ${documentType}`);
 }
-
