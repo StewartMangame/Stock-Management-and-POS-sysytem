@@ -446,6 +446,7 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
         appliedMinor: p.appliedMinor,
         tenderedMinor: p.tenderedMinor,
         methodDetails: p.details,
+        existingPaymentId: p.existingPaymentId,
       })),
     });
 
@@ -913,6 +914,9 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
         onClose={() => setIsPaymentOpen(false)}
         totalMinor={grandTotalMinor}
         onCompleteSale={handleCompleteSale}
+        shiftId={shift?.id}
+        locationId={shift?.locationId}
+        customerId={selectedCustomerId || undefined}
       />
 
       <PostSaleModal

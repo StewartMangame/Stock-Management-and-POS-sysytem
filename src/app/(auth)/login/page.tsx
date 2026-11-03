@@ -1,21 +1,16 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, Suspense } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { toast } from 'sonner';
 import { Loader2, Lock, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { loginSchema, type LoginInput } from '@/lib/validation';
-import type { Metadata } from 'next';
-
-// Note: metadata export is for server components only.
-// Title is set in the server page component below.
 
 const ERROR_MESSAGES: Record<string, string> = {
   CredentialsSignin: 'Incorrect email or password.',
@@ -23,7 +18,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   default: 'Sign in failed. Please try again.',
 };
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams?.get('callbackUrl') ?? '/dashboard';
@@ -157,5 +152,19 @@ export default function LoginPage() {
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <Card className="w-full max-w-md shadow-lg p-12 flex justify-center items-center">
+          <Loader2 className="h-8 w-8 animate-spin text-ace-navy" />
+        </Card>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

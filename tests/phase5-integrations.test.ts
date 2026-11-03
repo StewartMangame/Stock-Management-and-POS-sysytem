@@ -73,6 +73,7 @@ import {
 } from '@/server/services/integrations/bank-reconciliation';
 import { createDirectInvoice, issueInvoice } from '@/server/services/sales/invoices';
 import { todayInCompanyTz, getNow } from '@/lib/timezone';
+import { executeStockMovements } from '@/server/services/stock/stock-engine';
 
 let testLocId: string;
 let testCustId: string;
@@ -172,13 +173,17 @@ beforeAll(async () => {
     .returning();
   testProductId = prod!.id;
 
-  // Seed stock balance
-  await db.insert(stockBalances).values({
-    productId: testProductId,
-    locationId: testLocId,
-    onHand: '500.000',
-    reserved: '0.000',
-  });
+  // Seed stock balance via ledger movement
+  await executeStockMovements(db, [
+    {
+      productId: testProductId,
+      locationId: testLocId,
+      quantity: 500,
+      unitCostMinor: 50000,
+      movementType: 'purchase_receipt',
+      referenceType: 'goods_receipt',
+    },
+  ]);
 
   // Open a POS shift
   const shift = await openShift({
