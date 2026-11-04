@@ -37,6 +37,13 @@ neonConfig.webSocketConstructor = ws;
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main() {
+  // ── PRODUCTION GUARD ──────────────────────────────────────────────────────
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      '[seed] REFUSED: Demo seed scripts must not run in NODE_ENV=production. ' +
+      'Use a proper migration and secure user-creation process for production environments.',
+    );
+  }
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error('DATABASE_URL is not set');
 

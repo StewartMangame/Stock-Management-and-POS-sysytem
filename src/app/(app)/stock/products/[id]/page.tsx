@@ -14,6 +14,7 @@ import { formatMwk } from '@/lib/money';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ProductForm } from '../ProductForm';
+import { EntityHistoryTab } from '@/components/shared/EntityHistoryTab';
 
 export const metadata: Metadata = { title: 'Edit Product | Ace Holdings POS' };
 
@@ -105,6 +106,9 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
         allProducts={allProducts}
         isEditing
       />
+
+      {/* Historical Audit Log Timeline */}
+      <EntityHistoryTab entityType="product" entityId={product.id} />
     </div>
   );
 }

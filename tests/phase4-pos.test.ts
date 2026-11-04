@@ -1071,6 +1071,7 @@ describe('Phase 4 — Counter POS & Shift Reconciliation', () => {
   // 16. Card Refund Reference Validation
   // ─────────────────────────────────────────────────────────────────────────────
   it('16. Card Refund Validation: card refund without reference is rejected; with reference succeeds', async () => {
+    await ensureNoOpenShift(testCashier2Id);
     const shift = await openShift({
       cashierId: testCashier2Id,
       locationId: testLocId,

@@ -41,6 +41,7 @@ import {
   CreditCard,
 } from 'lucide-react';
 import { issueInvoiceAction, voidInvoiceAction } from '../actions';
+import { EntityHistoryTab } from '@/components/shared/EntityHistoryTab';
 
 interface InvoiceDetailProps {
   invoice: {
@@ -692,6 +693,9 @@ export function InvoiceDetailClient({ invoice: inv }: InvoiceDetailProps) {
           </CardContent>
         </Card>
       )}
+
+      {/* Audit History Timeline */}
+      <EntityHistoryTab entityType="sales_document" entityId={inv.id} />
 
       {/* Void Dialog */}
       <Dialog open={voidDialogOpen} onOpenChange={setVoidDialogOpen}>

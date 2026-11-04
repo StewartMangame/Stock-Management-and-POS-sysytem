@@ -11,22 +11,35 @@ import {
   CreditCard,
   BarChart3,
   Settings,
-  Users,
   Monitor,
   ChevronDown,
   ChevronRight,
+  Wallet,
+  ClipboardList,
+  ShieldCheck,
+  BookOpen,
+  History,
 } from 'lucide-react';
 import { useState } from 'react';
+import { PERMISSIONS } from '@/lib/permissions';
+
+interface NavChild {
+  label: string;
+  href: string;
+  permission?: string; // optional – if set, hidden unless user has this permission
+}
 
 interface NavItem {
   label: string;
   href?: string;
   icon: React.ComponentType<{ className?: string }>;
-  children?: { label: string; href: string }[];
-  badge?: string;
+  children?: NavChild[];
+  permission?: string; // top-level permission gate
 }
 
-const navGroups: NavItem[] = [
+// ── Static nav definition ────────────────────────────────────────────────────
+// Children with no `permission` are always shown when the parent is visible.
+const NAV_GROUPS: NavItem[] = [
   {
     label: 'Dashboard',
     href: '/dashboard',
@@ -35,85 +48,114 @@ const navGroups: NavItem[] = [
   {
     label: 'Sales',
     icon: ShoppingCart,
+    permission: PERMISSIONS.INVOICES_VIEW,
     children: [
-      { label: 'Customers', href: '/sales/customers' },
-      { label: 'Quotations', href: '/sales/quotations' },
-      { label: 'Invoices', href: '/sales/invoices' },
-      { label: 'Delivery Notes', href: '/sales/delivery-notes' },
-      { label: 'Credit Notes', href: '/sales/credit-notes' },
-      { label: 'Payments', href: '/sales/payments' },
-      { label: 'Aged Debtors', href: '/sales/aged-debtors' },
+      { label: 'Customers', href: '/sales/customers', permission: PERMISSIONS.CUSTOMERS_VIEW },
+      { label: 'Quotations', href: '/sales/quotations', permission: PERMISSIONS.QUOTATIONS_VIEW },
+      { label: 'Invoices', href: '/sales/invoices', permission: PERMISSIONS.INVOICES_VIEW },
+      { label: 'Delivery Notes', href: '/sales/delivery-notes', permission: PERMISSIONS.DELIVERY_NOTES_MANAGE },
+      { label: 'Credit Notes', href: '/sales/credit-notes', permission: PERMISSIONS.CREDIT_NOTES_MANAGE },
+      { label: 'Payments', href: '/sales/payments', permission: PERMISSIONS.PAYMENTS_VIEW },
     ],
   },
   {
     label: 'Stock',
     icon: Package,
+    permission: PERMISSIONS.STOCK_VIEW,
     children: [
-      { label: 'Products', href: '/stock/products' },
-      { label: 'Stock On Hand', href: '/stock/on-hand' },
-      { label: 'Stock Ledger', href: '/stock/movements' },
-      { label: 'Adjustments', href: '/stock/adjustments' },
-      { label: 'Stock Counts', href: '/stock/counts' },
-      { label: 'Serial Numbers', href: '/stock/serials' },
-      { label: 'Categories', href: '/stock/categories' },
-      { label: 'Units of Measure', href: '/stock/units' },
-      { label: 'Import CSV', href: '/stock/products/import' },
+      { label: 'Products', href: '/stock/products', permission: PERMISSIONS.PRODUCTS_VIEW },
+      { label: 'Stock On Hand', href: '/stock/on-hand', permission: PERMISSIONS.STOCK_VIEW },
+      { label: 'Stock Ledger', href: '/stock/movements', permission: PERMISSIONS.STOCK_VIEW },
+      { label: 'Adjustments', href: '/stock/adjustments', permission: PERMISSIONS.STOCK_ADJUST },
+      { label: 'Stock Counts', href: '/stock/counts', permission: PERMISSIONS.STOCK_COUNT },
+      { label: 'Serial Numbers', href: '/stock/serials', permission: PERMISSIONS.SERIALS_VIEW },
+      { label: 'Categories', href: '/stock/categories', permission: PERMISSIONS.PRODUCTS_MANAGE },
+      { label: 'Units of Measure', href: '/stock/units', permission: PERMISSIONS.PRODUCTS_MANAGE },
+      { label: 'Import CSV', href: '/stock/products/import', permission: PERMISSIONS.PRODUCTS_MANAGE },
     ],
   },
   {
     label: 'Purchasing',
     icon: Truck,
+    permission: PERMISSIONS.PURCHASE_ORDERS_VIEW,
     children: [
-      { label: 'Suppliers', href: '/purchasing/suppliers' },
-      { label: 'Purchase Orders', href: '/purchasing/orders' },
-      { label: 'Goods Received', href: '/purchasing/receipts' },
+      { label: 'Suppliers', href: '/purchasing/suppliers', permission: PERMISSIONS.SUPPLIERS_VIEW },
+      { label: 'Purchase Orders', href: '/purchasing/orders', permission: PERMISSIONS.PURCHASE_ORDERS_VIEW },
+      { label: 'Goods Received', href: '/purchasing/receipts', permission: PERMISSIONS.GOODS_RECEIPTS_MANAGE },
     ],
   },
   {
     label: 'Counter POS',
     href: '/pos',
     icon: Monitor,
+    permission: PERMISSIONS.POS_ACCESS,
   },
   {
     label: 'Payments',
+    href: '/payments',
     icon: CreditCard,
-    children: [
-      { label: 'OneKhusa Status', href: '/payments/mobile-money' },
-      { label: 'Card Reconciliation', href: '/payments/card-reconciliation' },
-      { label: 'Bank Transfers', href: '/payments/bank-transfers' },
-    ],
+    permission: PERMISSIONS.PAYMENTS_VIEW,
   },
   {
     label: 'Reports',
     icon: BarChart3,
+    permission: PERMISSIONS.REPORTS_VIEW,
     children: [
-      { label: 'Sales Report', href: '/reports/sales' },
-      { label: 'Stock Report', href: '/reports/stock' },
-      { label: 'Profit Report', href: '/reports/profit' },
-      { label: 'VAT Summary', href: '/reports/vat' },
-      { label: 'Shift Reports', href: '/reports/shifts' },
+      { label: 'Reports Centre', href: '/reports' },
+      { label: 'Sales', href: '/reports/sales', permission: PERMISSIONS.REPORTS_VIEW },
+      { label: 'Profit', href: '/reports/profit', permission: PERMISSIONS.REPORTS_COST },
+      { label: 'VAT Summary', href: '/reports/vat', permission: PERMISSIONS.REPORTS_COST },
+      { label: 'Stock', href: '/reports/stock', permission: PERMISSIONS.STOCK_VIEW },
+      { label: 'Purchasing', href: '/reports/purchasing', permission: PERMISSIONS.PURCHASE_ORDERS_VIEW },
+      { label: 'Warranty', href: '/reports/warranty', permission: PERMISSIONS.REPORTS_VIEW },
+      { label: 'Pipeline', href: '/reports/pipeline', permission: PERMISSIONS.REPORTS_VIEW },
+      { label: 'Receivables', href: '/reports/aged-debtors', permission: PERMISSIONS.REPORTS_VIEW },
+      { label: 'Payments Received', href: '/reports/payments-received', permission: PERMISSIONS.PAYMENTS_VIEW },
+      { label: 'Customer Statement', href: '/reports/customer-statement', permission: PERMISSIONS.REPORTS_VIEW },
+      { label: 'Controls', href: '/reports/controls', permission: PERMISSIONS.REPORTS_COST },
+      { label: 'POS Shifts', href: '/reports/shifts', permission: PERMISSIONS.SHIFTS_MANAGE },
     ],
   },
   {
     label: 'Settings',
     icon: Settings,
+    permission: PERMISSIONS.SETTINGS_VIEW,
     children: [
-      { label: 'Users', href: '/admin/users' },
-      { label: 'App Settings', href: '/admin/settings' },
-      { label: 'Locations', href: '/admin/locations' },
-      { label: 'Integrations', href: '/admin/integrations' },
-      { label: 'Exceptions', href: '/admin/exceptions' },
-      { label: 'Audit Log', href: '/admin/audit-log' },
+      { label: 'Users', href: '/admin/users', permission: PERMISSIONS.USERS_VIEW },
+      { label: 'App Settings', href: '/admin/settings', permission: PERMISSIONS.SETTINGS_MANAGE },
+      { label: 'Locations', href: '/admin/locations', permission: PERMISSIONS.LOCATIONS_MANAGE },
+      { label: 'Integrations', href: '/admin/integrations', permission: PERMISSIONS.SETTINGS_MANAGE },
+      { label: 'Card Terminals', href: '/admin/card-terminals', permission: PERMISSIONS.PAYMENTS_RECONCILE },
+      { label: 'Exceptions', href: '/admin/exceptions', permission: PERMISSIONS.PAYMENTS_EXCEPTIONS },
+      { label: 'Audit Log', href: '/admin/audit-log', permission: PERMISSIONS.AUDIT_LOG_VIEW },
+      { label: 'System Checks', href: '/admin/system-checks', permission: PERMISSIONS.SYSTEM_CHECKS_RUN },
+      { label: 'Accounting Export', href: '/admin/accounting', permission: PERMISSIONS.ACCOUNTING_VIEW },
     ],
   },
 ];
 
-function NavGroup({ item }: { item: NavItem }) {
+// ── Component ─────────────────────────────────────────────────────────────────
+
+function NavGroup({
+  item,
+  permissions,
+}: {
+  item: NavItem;
+  permissions: string[];
+}) {
   const pathname = usePathname() ?? '';
 
-  const isChildActive = item.children?.some((c) => pathname.startsWith(c.href));
+  // Filter visible children
+  const visibleChildren = item.children?.filter(
+    (c) => !c.permission || permissions.includes(c.permission),
+  );
+
+  const isChildActive = visibleChildren?.some(
+    (c) => pathname === c.href || pathname.startsWith(c.href + '/'),
+  );
   const [open, setOpen] = useState(isChildActive ?? false);
 
+  // Top-level leaf link
   if (item.href) {
     const active = pathname === item.href || pathname.startsWith(item.href + '/');
     return (
@@ -132,6 +174,8 @@ function NavGroup({ item }: { item: NavItem }) {
       </Link>
     );
   }
+
+  if (!visibleChildren?.length) return null;
 
   return (
     <div>
@@ -156,7 +200,7 @@ function NavGroup({ item }: { item: NavItem }) {
 
       {open && (
         <div className="ml-7 mt-1 flex flex-col gap-0.5 border-l border-ace-band pl-3">
-          {item.children?.map((child) => {
+          {visibleChildren.map((child) => {
             const active = pathname === child.href || pathname.startsWith(child.href + '/');
             return (
               <Link
@@ -180,13 +224,17 @@ function NavGroup({ item }: { item: NavItem }) {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ permissions = [] }: { permissions?: string[] }) {
+  // Filter top-level groups by permission
+  const visibleGroups = NAV_GROUPS.filter(
+    (item) => !item.permission || permissions.includes(item.permission),
+  );
+
   return (
     <aside className="flex h-full w-56 shrink-0 flex-col border-r border-gray-200 bg-white">
       {/* Logo area */}
       <div className="flex h-14 items-center border-b border-ace-band px-4">
         <div className="flex items-center gap-2">
-          {/* Placeholder logo â€” replace with <Image> when ace-logo.png is supplied */}
           <div className="flex h-8 w-8 items-center justify-center rounded bg-ace-navy text-xs font-bold text-white">
             A
           </div>
@@ -200,8 +248,8 @@ export function Sidebar() {
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-2 py-3">
         <div className="flex flex-col gap-0.5">
-          {navGroups.map((item) => (
-            <NavGroup key={item.label} item={item} />
+          {visibleGroups.map((item) => (
+            <NavGroup key={item.label} item={item} permissions={permissions} />
           ))}
         </div>
       </nav>

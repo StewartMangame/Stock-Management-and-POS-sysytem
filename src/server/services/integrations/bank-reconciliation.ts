@@ -14,7 +14,8 @@ import {
 } from '@/server/db/schema';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { writeAuditLog } from '@/server/services/audit';
-import { getNow } from '@/lib/timezone';
+import { getNow, todayInCompanyTz } from '@/lib/timezone';
+import { recordPaymentWithTx } from '@/server/services/sales/payments';
 
 export interface ColumnMapping {
   dateColumn: string;
@@ -416,4 +417,87 @@ export async function unmatchStatementLine(statementLineId: string, userId?: str
     return { success: true, unmatchedCount: matches.length };
   });
 }
+
+/**
+ * Records a new payment directly from an unmatched bank statement line,
+ * allocating it to invoices if provided, and reconciles the statement line atomically.
+ * Matched only once — rejects if line is already matched.
+ */
+export async function recordPaymentFromStatementLine(
+  statementLineId: string,
+  customerId: string,
+  locationId: string,
+  allocations: Array<{ invoiceId: string; amountMinor: number }> = [],
+  userId?: string,
+) {
+  return await db.transaction(async (tx) => {
+    // 1. Lock statement line
+    const [line] = await tx
+      .select()
+      .from(statementLines)
+      .where(eq(statementLines.id, statementLineId))
+      .for('update');
+
+    if (!line) throw new Error(`Statement line '${statementLineId}' not found.`);
+    if (line.matchStatus === 'matched') {
+      throw new Error(`Statement line '${statementLineId}' has already been matched.`);
+    }
+
+    const today = todayInCompanyTz();
+    const paymentDate = line.transactionDate
+      ? new Date(line.transactionDate).toISOString().slice(0, 10)
+      : today;
+
+    // 2. Record payment with tx
+    const bankRef = line.reference || `STMT-${line.id.slice(0, 8)}`;
+    const { payment } = await recordPaymentWithTx(
+      tx,
+      {
+        idempotencyKey: `stmt-line-${line.id}`,
+        customerId,
+        locationId,
+        kind: 'receipt',
+        method: 'bank_transfer',
+        amountMinor: line.amountMinor,
+        paymentDate,
+        methodDetails: {
+          bank_reference: bankRef,
+        },
+        notes: line.description ? `Recorded from statement: ${line.description}` : 'Recorded from bank statement',
+        allocations,
+      },
+      userId,
+    );
+
+    // 3. Insert reconciliation match
+    await tx.insert(reconciliationMatches).values({
+      statementLineId: line.id,
+      paymentId: payment.id,
+      matchedAmountMinor: line.amountMinor,
+      matchedBy: userId,
+      notes: 'Recorded and matched from statement line',
+    });
+
+    // 4. Update statement line match status
+    await tx
+      .update(statementLines)
+      .set({ matchStatus: 'matched' })
+      .where(eq(statementLines.id, line.id));
+
+    // 5. Update payment reconciliation status
+    await tx
+      .update(payments)
+      .set({
+        reconciliationStatus: 'reconciled',
+        reconciledAt: getNow(),
+        reconciledBy: userId,
+        reconciliationNote: 'Reconciled upon creation from statement line',
+        updatedAt: getNow(),
+      })
+      .where(eq(payments.id, payment.id));
+
+    return payment;
+  });
+}
+
 

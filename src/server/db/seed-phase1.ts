@@ -25,9 +25,10 @@ import { executeStockMovements } from '@/server/services/stock/stock-engine';
 import { getNextDocNumber } from '@/server/services/sequences';
 
 async function main() {
-  if (process.env.NODE_ENV === 'production') {
+  // ── PRODUCTION GUARD ───────────────────────────────────────────────────
+  if ((process.env.NODE_ENV as string) === 'production') {
     console.error('[seed-phase1] ✗ Refusing to run demo seed in production environment!');
-    process.exit(1);
+    throw new Error('[seed-phase1] REFUSED: Demo seed must not run in production.');
   }
 
   console.log('[seed-phase1] Starting Phase 1 demo seed...');

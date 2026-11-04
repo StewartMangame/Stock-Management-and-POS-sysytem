@@ -10,6 +10,7 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     testTimeout: 120000,
     hookTimeout: 120000,
+    fileParallelism: false,
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     coverage: {
       provider: 'v8',

@@ -393,6 +393,10 @@ describe('Phase 1 Stock & Purchasing Invariants', () => {
         ]);
       });
 
+      // Ensure clean baseline before test
+      await db.transaction(async (tx) => {
+        await rebuildStockBalances(tx);
+      });
       // Verify baseline consistency
       const checkBefore = await checkStockLedgerConsistency(db);
       expect(checkBefore.isConsistent).toBe(true);

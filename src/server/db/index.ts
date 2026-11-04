@@ -21,10 +21,15 @@ declare global {
   var __neonPool: Pool | undefined;
 }
 
+const connectionString =
+  (process.env.NODE_ENV === 'test' && (process.env.TEST_DATABASE_URL || process.env.DATABASE_URL_TEST))
+    ? (process.env.TEST_DATABASE_URL || process.env.DATABASE_URL_TEST)
+    : process.env.DATABASE_URL;
+
 const pool: Pool =
   globalThis.__neonPool ??
   new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString,
     // Neon's serverless pool reuses connections efficiently across requests.
     max: 10,
   });
