@@ -76,16 +76,16 @@ export default async function WarrantyReportPage({
   );
 
   const bucketSummary = (
-    <div className="mt-4 grid grid-cols-3 gap-4">
-      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-center">
+    <div key="warranty-bucket-summary" className="mt-4 grid grid-cols-3 gap-4">
+      <div key="w-30" className="rounded-lg border border-red-200 bg-red-50 p-4 text-center">
         <p className="text-2xl font-bold text-red-700">{within30.length}</p>
         <p className="text-sm text-red-600 mt-1">Expiring within 30 days</p>
       </div>
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
+      <div key="w-60" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
         <p className="text-2xl font-bold text-amber-700">{within60.length}</p>
         <p className="text-sm text-amber-600 mt-1">Expiring in 31–60 days</p>
       </div>
-      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-center">
+      <div key="w-90" className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-center">
         <p className="text-2xl font-bold text-blue-700">{within90.length}</p>
         <p className="text-sm text-blue-600 mt-1">Expiring in 61–90 days</p>
       </div>

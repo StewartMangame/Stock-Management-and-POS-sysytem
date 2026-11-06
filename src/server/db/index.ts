@@ -34,6 +34,11 @@ const pool: Pool =
     max: 10,
   });
 
+// Suppress unhandled error crashes from idle pool connections terminated by server
+pool.on('error', (err) => {
+  // Ignored or logged; Pool handles removing closed clients automatically
+});
+
 if (process.env.NODE_ENV !== 'production') {
   globalThis.__neonPool = pool;
 }

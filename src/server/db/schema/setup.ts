@@ -128,6 +128,8 @@ export const SETTING_KEYS = [
   'reservation_hold_days',
   'pos_blind_cash_up',
   'pos_return_window_days',
+  'cost_variance_threshold_percent',
+  'cost_above_selling_price_threshold_percent',
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];

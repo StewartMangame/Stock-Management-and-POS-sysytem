@@ -592,14 +592,21 @@ export function ReceiptForm({
                     />
                   </div>
 
-                  <div className="md:col-span-3 text-right">
-                    <div className="text-xs text-ace-muted">Line Value + Landed</div>
-                    <div className="font-mono text-sm font-semibold text-ace-navy">
+                  <div className="md:col-span-3 text-right bg-blue-50/70 p-2.5 rounded-lg border border-blue-200 shadow-sm">
+                    <div className="text-[10px] font-bold text-blue-900 uppercase tracking-wider">
+                      Converted MWK Subtotal
+                    </div>
+                    <div className="font-mono text-base font-bold text-ace-navy">
                       {formatMwk(totalLineMwkMinor)}
                     </div>
-                    <div className="text-xs text-ace-blue font-mono">
-                      Landed Unit: {formatMwk(effectiveUnitCostMinor)}
+                    <div className="text-xs text-ace-blue font-mono font-semibold">
+                      Unit Cost: {formatMwk(effectiveUnitCostMinor)}
                     </div>
+                    {currency !== 'MWK' && (
+                      <div className="text-[10px] text-gray-600 font-mono mt-0.5">
+                        Supplier: {currency} {lineSupplier.toFixed(2)} ({currency} {unitCostNum.toFixed(2)}/unit)
+                      </div>
+                    )}
                   </div>
 
                   <div className="md:col-span-1 text-right">

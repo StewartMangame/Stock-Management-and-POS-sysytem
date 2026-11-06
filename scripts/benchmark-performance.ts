@@ -198,13 +198,44 @@ async function main() {
     `);
     await client.query('ANALYZE stock_movements; ANALYZE sales_documents;');
 
-    // 3. EXPLAIN ANALYZE on the three core queries
+    // 3. EXPLAIN ANALYZE on the core queries
     const fromDate = '2026-10-01';
-    const toDate = '2026-11-04';
+    const toDate = '2026-11-30';
 
     console.log('\n===============================================================');
     console.log('1. EXPLAIN (ANALYZE, BUFFERS) - Sales by Item (20,000 Invoices)');
     console.log('===============================================================');
+    const salesActual = await client.query(`
+      WITH issued AS (
+        SELECT
+          sdl.product_id,
+          SUM(sdl.quantity) AS qty,
+          SUM(sdl.line_total_minor - sdl.tax_minor) AS revenue,
+          SUM(COALESCE(dnl.total_cost_minor, 0)) AS cost_val
+        FROM sales_documents sd
+        JOIN sales_document_lines sdl ON sdl.document_id = sd.id
+        LEFT JOIN delivery_note_lines dnl ON dnl.sales_document_line_id = sdl.id
+        WHERE sd.document_type = 'invoice'
+          AND sd.status IN ('issued', 'paid', 'partially_paid')
+          AND sd.issue_date >= $1::date
+          AND sd.issue_date <= $2::date
+        GROUP BY sdl.product_id
+      )
+      SELECT
+        p.id AS product_id,
+        p.name AS product_name,
+        COALESCE(p.sku, '') AS sku,
+        COALESCE(cat.name, 'Uncategorised') AS category_name,
+        COALESCE(i.qty, 0)::text AS quantity_sold,
+        COALESCE(i.revenue, 0)::text AS revenue_minor,
+        COALESCE(i.cost_val, 0)::text AS cost_minor
+      FROM products p
+      LEFT JOIN categories cat ON cat.id = p.category_id
+      JOIN issued i ON i.product_id = p.id
+      ORDER BY i.revenue DESC;
+    `, [fromDate, toDate]);
+    console.log(`[Query 1 Result] Aggregated product rows returned: ${salesActual.rows.length}`);
+
     const salesPlan = await client.query(`
       EXPLAIN (ANALYZE, BUFFERS, COSTS)
       WITH issued AS (
@@ -240,6 +271,33 @@ async function main() {
     console.log('\n===============================================================');
     console.log('2. EXPLAIN (ANALYZE, BUFFERS) - Stock Valuation As-Of (50,000 Movements)');
     console.log('===============================================================');
+    const stockActual = await client.query(`
+      WITH ledger_replay AS (
+        SELECT
+          sm.product_id,
+          sm.location_id,
+          SUM(sm.quantity) AS on_hand_replayed,
+          ROUND(SUM(sm.total_cost_minor))::bigint AS valuation_replayed
+        FROM stock_movements sm
+        WHERE sm.occurred_at <= $1::timestamptz
+        GROUP BY sm.product_id, sm.location_id
+        HAVING SUM(sm.quantity) > 0
+      )
+      SELECT
+        p.id,
+        p.name,
+        p.sku,
+        loc.name AS location_name,
+        COALESCE(lr.on_hand_replayed, 0)::text AS on_hand,
+        p.avg_cost_minor::text AS avg_cost_minor,
+        COALESCE(lr.valuation_replayed, 0)::text AS valuation_minor
+      FROM products p
+      JOIN ledger_replay lr ON lr.product_id = p.id
+      JOIN locations loc ON loc.id = lr.location_id
+      WHERE p.is_active = TRUE
+      ORDER BY loc.name, p.name;
+    `, [new Date().toISOString()]);
+    console.log(`[Query 2 Result] Product valuation rows returned: ${stockActual.rows.length}`);
     const stockPlan = await client.query(`
       EXPLAIN (ANALYZE, BUFFERS, COSTS)
       WITH ledger_replay AS (
@@ -272,6 +330,27 @@ async function main() {
     console.log('\n===============================================================');
     console.log('3. EXPLAIN (ANALYZE, BUFFERS) - VAT Summary (20,000 Invoices)');
     console.log('===============================================================');
+    const vatActual = await client.query(`
+      SELECT
+        sdl.tax_rate_id,
+        COALESCE(tr.name, CONCAT((sdl.tax_rate_basis_points::numeric / 100)::text, '%')) AS rate_name,
+        (sdl.tax_rate_basis_points::numeric / 100)::text AS rate_percent,
+        SUM(CASE WHEN sd.document_type = 'invoice' THEN (sdl.line_total_minor - sdl.tax_minor) ELSE 0 END)::text AS taxable_sales_minor,
+        SUM(CASE WHEN sd.document_type = 'invoice' THEN sdl.tax_minor ELSE 0 END)::text AS output_vat_minor,
+        SUM(CASE WHEN sd.document_type = 'credit_note' THEN (sdl.line_total_minor - sdl.tax_minor) ELSE 0 END)::text AS taxable_credit_minor,
+        SUM(CASE WHEN sd.document_type = 'credit_note' THEN sdl.tax_minor ELSE 0 END)::text AS credit_vat_minor
+      FROM sales_documents sd
+      JOIN sales_document_lines sdl ON sdl.document_id = sd.id
+      LEFT JOIN tax_rates tr ON tr.id = sdl.tax_rate_id
+      WHERE sd.issue_date >= $1::date
+        AND sd.issue_date <= $2::date
+        AND sd.status != 'void'
+        AND sd.document_type IN ('invoice', 'credit_note')
+      GROUP BY sdl.tax_rate_id, tr.name, sdl.tax_rate_basis_points
+      ORDER BY rate_percent DESC;
+    `, [fromDate, toDate]);
+    console.log(`[Query 3 Result] Tax rate summary rows returned: ${vatActual.rows.length}`);
+
     const vatPlan = await client.query(`
       EXPLAIN (ANALYZE, BUFFERS, COSTS)
       SELECT
@@ -297,6 +376,27 @@ async function main() {
     console.log('\n===============================================================');
     console.log('4. EXPLAIN (ANALYZE, BUFFERS) - Profit by Item (20,000 Invoices & Delivery Notes)');
     console.log('===============================================================');
+    const profitActual = await client.query(`
+      SELECT
+        p.id AS product_id,
+        p.name AS product_name,
+        COALESCE(p.sku, '') AS sku,
+        COALESCE(cat.name, 'Uncategorised') AS category_name,
+        SUM(dnl.quantity)::text AS delivered_qty,
+        SUM(dnl.quantity * sdl.unit_price_minor)::text AS revenue_minor,
+        SUM(COALESCE(dnl.total_cost_minor, 0))::text AS cost_minor
+      FROM delivery_notes dn
+      JOIN delivery_note_lines dnl ON dnl.delivery_note_id = dn.id
+      JOIN sales_document_lines sdl ON sdl.id = dnl.sales_document_line_id
+      JOIN products p ON p.id = dnl.product_id
+      LEFT JOIN categories cat ON cat.id = p.category_id
+      WHERE dn.status = 'dispatched'
+        AND dn.delivery_date >= $1::date
+        AND dn.delivery_date <= $2::date
+      GROUP BY p.id, p.name, p.sku, cat.name
+      ORDER BY revenue_minor DESC;
+    `, [fromDate, toDate]);
+    console.log(`[Query 4 Result] Product profit rows returned: ${profitActual.rows.length}`);
     const profitPlan = await client.query(`
       EXPLAIN (ANALYZE, BUFFERS, COSTS)
       SELECT

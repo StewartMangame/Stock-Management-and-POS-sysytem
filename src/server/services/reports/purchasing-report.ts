@@ -71,27 +71,22 @@ export async function getOutstandingPurchaseOrders(): Promise<{
   }>(sql`
     SELECT
       po.id AS order_id,
-      po.order_number,
+      po.po_number AS order_number,
       s.id AS supplier_id,
       s.name AS supplier_name,
       to_char(po.order_date, 'YYYY-MM-DD') AS order_date,
       to_char(po.expected_delivery_date, 'YYYY-MM-DD') AS expected_delivery,
       loc.name AS location_name,
-      po.total_amount_minor::text AS total_ordered_minor,
-      COALESCE(SUM(gr_totals.received_minor), 0)::text AS total_received_minor,
+      po.total_minor::text AS total_ordered_minor,
+      COALESCE(SUM(gr.total_items_mwk_minor), 0)::text AS total_received_minor,
       EXTRACT(DAY FROM NOW() - po.created_at)::text AS age_days
     FROM purchase_orders po
     JOIN suppliers s ON s.id = po.supplier_id
     JOIN locations loc ON loc.id = po.location_id
-    LEFT JOIN LATERAL (
-      SELECT SUM(gr.total_amount_minor) AS received_minor
-      FROM goods_receipts gr
-      WHERE gr.purchase_order_id = po.id
-        AND gr.status = 'received'
-    ) gr_totals ON TRUE
-    WHERE po.status IN ('draft', 'sent', 'partially_received')
-    GROUP BY po.id, po.order_number, s.id, s.name, po.order_date,
-             po.expected_delivery_date, loc.name, po.total_amount_minor, po.created_at
+    LEFT JOIN goods_receipts gr ON gr.purchase_order_id = po.id AND gr.status = 'completed'
+    WHERE po.status IN ('draft', 'submitted', 'partially_received')
+    GROUP BY po.id, po.po_number, s.id, s.name, po.order_date,
+             po.expected_delivery_date, loc.name, po.total_minor, po.created_at
     ORDER BY po.order_date
   `);
 
@@ -136,15 +131,14 @@ export async function getGoodsReceivedSummary(
       s.id AS supplier_id,
       s.name AS supplier_name,
       COUNT(gr.id)::text AS receipt_count,
-      SUM(gr.total_amount_minor)::text AS total_cost_minor,
-      (SUM(gr.total_amount_minor) + COALESCE(SUM(lc.total_landed_cost_minor), 0))::text AS total_landed_minor
+      COALESCE(SUM(gr.total_items_mwk_minor), 0)::text AS total_cost_minor,
+      COALESCE(SUM(gr.total_items_mwk_minor + gr.total_landed_mwk_minor), 0)::text AS total_landed_minor
     FROM goods_receipts gr
     JOIN purchase_orders po ON po.id = gr.purchase_order_id
     JOIN suppliers s ON s.id = po.supplier_id
-    LEFT JOIN landed_costs lc ON lc.goods_receipt_id = gr.id
     WHERE gr.received_date >= ${fromInstant}
       AND gr.received_date < ${toInstant}
-      AND gr.status = 'received'
+      AND gr.status = 'completed'
     GROUP BY s.id, s.name
     ORDER BY total_cost_minor DESC
   `);
@@ -183,26 +177,23 @@ export async function getLandedCostAnalysis(
   }>(sql`
     SELECT
       gr.id AS receipt_id,
-      gr.receipt_number,
+      gr.grn_number AS receipt_number,
       s.name AS supplier_name,
       to_char(gr.received_date, 'YYYY-MM-DD') AS received_date,
-      gr.total_amount_minor::text AS product_cost_minor,
-      COALESCE(lc.freight_minor, 0)::text AS freight_minor,
-      COALESCE(lc.duty_minor, 0)::text AS duty_minor,
-      COALESCE(lc.clearance_minor, 0)::text AS clearance_minor,
-      COALESCE(lc.other_minor, 0)::text AS other_minor,
-      (gr.total_amount_minor
-        + COALESCE(lc.freight_minor, 0)
-        + COALESCE(lc.duty_minor, 0)
-        + COALESCE(lc.clearance_minor, 0)
-        + COALESCE(lc.other_minor, 0))::text AS total_landed_minor
+      gr.total_items_mwk_minor::text AS product_cost_minor,
+      COALESCE(SUM(lc.amount_mwk_minor) FILTER (WHERE lc.cost_type = 'freight'), 0)::text AS freight_minor,
+      COALESCE(SUM(lc.amount_mwk_minor) FILTER (WHERE lc.cost_type = 'duty'), 0)::text AS duty_minor,
+      COALESCE(SUM(lc.amount_mwk_minor) FILTER (WHERE lc.cost_type = 'clearing'), 0)::text AS clearance_minor,
+      COALESCE(SUM(lc.amount_mwk_minor) FILTER (WHERE lc.cost_type = 'other'), 0)::text AS other_minor,
+      (gr.total_items_mwk_minor + gr.total_landed_mwk_minor)::text AS total_landed_minor
     FROM goods_receipts gr
     JOIN purchase_orders po ON po.id = gr.purchase_order_id
     JOIN suppliers s ON s.id = po.supplier_id
     LEFT JOIN landed_costs lc ON lc.goods_receipt_id = gr.id
     WHERE gr.received_date >= ${fromInstant}
       AND gr.received_date < ${toInstant}
-      AND gr.status = 'received'
+      AND gr.status = 'completed'
+    GROUP BY gr.id, gr.grn_number, s.name, gr.received_date, gr.total_items_mwk_minor, gr.total_landed_mwk_minor
     ORDER BY gr.received_date DESC
   `);
 

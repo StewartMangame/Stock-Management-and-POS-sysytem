@@ -153,44 +153,58 @@ export async function runSystemChecks(executedById?: string): Promise<SystemChec
     });
   }
 
-  // ── Check 3: Stock Reservation Integrity (reserved <= on_hand) ───────────
+  // ── Check 3: Stock Reservation Integrity (stock_balances.reserved vs active stock_reservations) ───
   try {
     const res = await db.execute<{
       product_id: string;
       location_id: string;
       on_hand: string;
-      reserved: string;
+      balance_reserved: string;
+      active_reservations_qty: string;
     }>(sql`
+      WITH active_res AS (
+        SELECT product_id, location_id, SUM(reserved_qty - fulfilled_qty) AS total_qty
+        FROM stock_reservations
+        WHERE status = 'active'
+        GROUP BY product_id, location_id
+      )
       SELECT
         sb.product_id,
         sb.location_id,
         sb.on_hand::text,
-        sb.reserved::text
+        sb.reserved::text AS balance_reserved,
+        COALESCE(ar.total_qty, 0)::text AS active_reservations_qty
       FROM stock_balances sb
-      WHERE sb.reserved > sb.on_hand OR sb.reserved < 0 OR sb.on_hand < 0
+      LEFT JOIN active_res ar ON ar.product_id = sb.product_id AND ar.location_id = sb.location_id
+      WHERE sb.reserved > sb.on_hand 
+         OR sb.reserved < 0 
+         OR sb.on_hand < 0
+         OR ABS(sb.reserved - COALESCE(ar.total_qty, 0)) > 0.001
     `);
 
     const discrepancies = res.rows.map((r) => ({
       productId: r.product_id,
       locationId: r.location_id,
       onHand: Number(r.on_hand),
-      reserved: Number(r.reserved),
+      balanceReserved: Number(r.balance_reserved),
+      activeReservations: Number(r.active_reservations_qty),
+      diff: Math.abs(Number(r.balance_reserved) - Number(r.active_reservations_qty)),
     }));
 
     checks.push({
       code: 'stock_reservation_integrity',
-      name: 'Stock Balance & Reservation Invariants',
+      name: 'Stock Reservation & Balance Invariants',
       status: discrepancies.length === 0 ? 'pass' : 'fail',
       summary: discrepancies.length === 0
-        ? 'All stock reservations and on-hand balances satisfy invariant: 0 <= reserved <= on_hand.'
-        : `${discrepancies.length} balance record(s) violate stock non-negativity or over-reservation invariant.`,
+        ? 'All stock reservations reconcile with active stock_reservations (0 <= reserved <= on_hand).'
+        : `${discrepancies.length} balance record(s) violate stock reservation or non-negativity invariants.`,
       discrepancyCount: discrepancies.length,
       details: discrepancies.slice(0, 10),
     });
   } catch (err: any) {
     checks.push({
       code: 'stock_reservation_integrity',
-      name: 'Stock Balance & Reservation Invariants',
+      name: 'Stock Reservation & Balance Invariants',
       status: 'fail',
       summary: `Check failed to execute: ${err.message}`,
       discrepancyCount: 1,
@@ -283,6 +297,334 @@ export async function runSystemChecks(executedById?: string): Promise<SystemChec
     });
   }
 
+  // ── Check 6: Invoice Paid Amount & Balance vs Allocations ──────────────────
+  try {
+    const res = await db.execute<{
+      document_id: string;
+      document_number: string;
+      total_minor: string;
+      balance_minor: string;
+      allocations_sum: string;
+    }>(sql`
+      SELECT
+        sd.id AS document_id,
+        sd.document_number,
+        sd.total_minor::text,
+        sd.balance_minor::text,
+        COALESCE(SUM(pa.amount_minor), 0)::text AS allocations_sum
+      FROM sales_documents sd
+      LEFT JOIN payment_allocations pa ON pa.invoice_id = sd.id
+      WHERE sd.document_type = 'invoice'
+        AND sd.status IN ('issued', 'partially_paid', 'paid')
+      GROUP BY sd.id, sd.document_number, sd.total_minor, sd.balance_minor
+      HAVING (sd.total_minor - sd.balance_minor) != COALESCE(SUM(pa.amount_minor), 0)
+    `);
+
+    const discrepancies = res.rows.map((r) => ({
+      documentId: r.document_id,
+      documentNumber: r.document_number,
+      totalMinor: Number(r.total_minor),
+      balanceMinor: Number(r.balance_minor),
+      paidDerived: Number(r.total_minor) - Number(r.balance_minor),
+      allocationsSum: Number(r.allocations_sum),
+    }));
+
+    checks.push({
+      code: 'invoice_allocation_reconciliation',
+      name: 'Invoice Paid & Balance vs Payment Allocations',
+      status: discrepancies.length === 0 ? 'pass' : 'fail',
+      summary: discrepancies.length === 0
+        ? 'All invoice balances reconcile exactly with payment allocations.'
+        : `${discrepancies.length} invoice(s) have paid/balance amounts that do not match payment allocations.`,
+      discrepancyCount: discrepancies.length,
+      details: discrepancies.slice(0, 10),
+    });
+  } catch (err: any) {
+    checks.push({
+      code: 'invoice_allocation_reconciliation',
+      name: 'Invoice Paid & Balance vs Payment Allocations',
+      status: 'fail',
+      summary: `Check failed to execute: ${err.message}`,
+      discrepancyCount: 1,
+    });
+  }
+
+  // ── Check 7: Payments Exceeding Pending/Awaiting Limits ────────────────────
+  try {
+    const res = await db.execute<{
+      id: string;
+      payment_number: string;
+      status: string;
+      created_at: string;
+    }>(sql`
+      SELECT
+        id,
+        payment_number,
+        status,
+        created_at::text
+      FROM payments
+      WHERE (status = 'awaiting_sale' AND created_at < NOW() - INTERVAL '2 hours')
+         OR (status = 'pending' AND created_at < NOW() - INTERVAL '24 hours')
+    `);
+
+    const discrepancies = res.rows.map((r) => ({
+      paymentId: r.id,
+      paymentNumber: r.payment_number,
+      status: r.status,
+      createdAt: r.created_at,
+    }));
+
+    checks.push({
+      code: 'payments_time_limits',
+      name: 'Payments Exceeding Pending / Awaiting-Sale Limits',
+      status: discrepancies.length === 0 ? 'pass' : 'warning',
+      summary: discrepancies.length === 0
+        ? 'No payments exceeded the awaiting_sale (2h) or pending (24h) threshold.'
+        : `${discrepancies.length} payment(s) exceeded time limit in awaiting_sale or pending status.`,
+      discrepancyCount: discrepancies.length,
+      details: discrepancies.slice(0, 10),
+    });
+  } catch (err: any) {
+    checks.push({
+      code: 'payments_time_limits',
+      name: 'Payments Exceeding Pending / Awaiting-Sale Limits',
+      status: 'fail',
+      summary: `Check failed to execute: ${err.message}`,
+      discrepancyCount: 1,
+    });
+  }
+
+  // ── Check 8: EIS Queue Health ───────────────────────────────────────────────
+  try {
+    const res = await db.execute<{
+      count: string;
+      oldest_pending: string;
+    }>(sql`
+      SELECT
+        COUNT(*)::text AS count,
+        MIN(created_at)::text AS oldest_pending
+      FROM eis_submissions
+      WHERE status IN ('pending', 'failed')
+        AND created_at < NOW() - INTERVAL '24 hours'
+    `);
+
+    const count = Number(res.rows[0]?.count ?? 0);
+    checks.push({
+      code: 'eis_queue_health',
+      name: 'EIS Submissions Queue Health',
+      status: count === 0 ? 'pass' : 'warning',
+      summary: count === 0
+        ? 'All EIS queue submissions processed within 24 hours.'
+        : `${count} EIS submission(s) pending or failed for over 24 hours (oldest: ${res.rows[0]?.oldest_pending}).`,
+      discrepancyCount: count,
+      details: count > 0 ? [{ count, oldest: res.rows[0]?.oldest_pending }] : [],
+    });
+  } catch (err: any) {
+    checks.push({
+      code: 'eis_queue_health',
+      name: 'EIS Submissions Queue Health',
+      status: 'fail',
+      summary: `Check failed to execute: ${err.message}`,
+      discrepancyCount: 1,
+    });
+  }
+
+  // ── Check 9: Orphan Database Records ────────────────────────────────────────
+  try {
+    const linesWithoutDocs = await db.execute<{ count: string }>(sql`
+      SELECT COUNT(*)::text AS count
+      FROM sales_document_lines sdl
+      LEFT JOIN sales_documents sd ON sd.id = sdl.document_id
+      WHERE sd.id IS NULL
+    `);
+    const allocsWithoutPmts = await db.execute<{ count: string }>(sql`
+      SELECT COUNT(*)::text AS count
+      FROM payment_allocations pa
+      LEFT JOIN payments p ON p.id = pa.payment_id
+      WHERE p.id IS NULL
+    `);
+    const allocsWithoutDocs = await db.execute<{ count: string }>(sql`
+      SELECT COUNT(*)::text AS count
+      FROM payment_allocations pa
+      LEFT JOIN sales_documents sd ON sd.id = pa.invoice_id
+      WHERE sd.id IS NULL
+    `);
+
+    const orphanCount = 
+      Number(linesWithoutDocs.rows[0]?.count ?? 0) +
+      Number(allocsWithoutPmts.rows[0]?.count ?? 0) +
+      Number(allocsWithoutDocs.rows[0]?.count ?? 0);
+
+    checks.push({
+      code: 'orphan_records',
+      name: 'Orphan Database Records Integrity',
+      status: orphanCount === 0 ? 'pass' : 'fail',
+      summary: orphanCount === 0
+        ? 'No orphan lines or payment allocation records detected.'
+        : `${orphanCount} orphan record(s) detected without valid parent references.`,
+      discrepancyCount: orphanCount,
+      details: orphanCount > 0 ? [
+        { linesWithoutDoc: linesWithoutDocs.rows[0]?.count },
+        { allocWithoutPmt: allocsWithoutPmts.rows[0]?.count },
+        { allocWithoutDoc: allocsWithoutDocs.rows[0]?.count },
+      ] : [],
+    });
+  } catch (err: any) {
+    checks.push({
+      code: 'orphan_records',
+      name: 'Orphan Database Records Integrity',
+      status: 'fail',
+      summary: `Check failed to execute: ${err.message}`,
+      discrepancyCount: 1,
+    });
+  }
+
+    // ── Check 10: Confirmed Payments Missing confirmed_at ───────────────────────
+  try {
+    const res = await db.execute<{
+      id: string;
+      payment_number: string;
+      status: string;
+    }>(sql`
+      SELECT id, payment_number, status
+      FROM payments
+      WHERE status = 'confirmed' AND confirmed_at IS NULL
+    `);
+
+    const discrepancies = res.rows.map((r) => ({
+      paymentId: r.id,
+      paymentNumber: r.payment_number,
+    }));
+
+    checks.push({
+      code: 'confirmed_payments_timestamp',
+      name: 'Confirmed Payments Timestamp Completeness',
+      status: discrepancies.length === 0 ? 'pass' : 'fail',
+      summary: discrepancies.length === 0
+        ? 'All confirmed payments have a valid confirmed_at timestamp.'
+        : `${discrepancies.length} confirmed payment(s) are missing confirmed_at timestamp.`,
+      discrepancyCount: discrepancies.length,
+      details: discrepancies.slice(0, 10),
+    });
+  } catch (err: any) {
+    checks.push({
+      code: 'confirmed_payments_timestamp',
+      name: 'Confirmed Payments Timestamp Completeness',
+      status: 'fail',
+      summary: `Check failed to execute: ${err.message}`,
+      discrepancyCount: 1,
+    });
+  }
+
+  // ── Check 11: Delivered Quantity vs Delivery Lines ──────────────────────────
+  try {
+    const res = await db.execute<{
+      line_id: string;
+      document_id: string;
+      delivered_qty: string;
+      dni_delivered: string;
+    }>(sql`
+      WITH dni_sum AS (
+        SELECT sales_document_line_id, SUM(quantity) AS total_delivered
+        FROM delivery_note_lines
+        GROUP BY sales_document_line_id
+      )
+      SELECT
+        sdl.id AS line_id,
+        sdl.document_id,
+        sdl.delivered_qty::text,
+        COALESCE(ds.total_delivered, 0)::text AS dni_delivered
+      FROM sales_document_lines sdl
+      LEFT JOIN dni_sum ds ON ds.sales_document_line_id = sdl.id
+      WHERE ABS(sdl.delivered_qty - COALESCE(ds.total_delivered, 0)) > 0.001
+    `);
+
+    const discrepancies = res.rows.map((r) => ({
+      lineId: r.line_id,
+      documentId: r.document_id,
+      lineDeliveredQty: Number(r.delivered_qty),
+      deliveryNotesSum: Number(r.dni_delivered),
+    }));
+
+    checks.push({
+      code: 'delivered_quantity_sync',
+      name: 'Delivered Quantity vs Delivery Note Items',
+      status: discrepancies.length === 0 ? 'pass' : 'fail',
+      summary: discrepancies.length === 0
+        ? 'All sales document line delivered quantities match delivery note line items.'
+        : `${discrepancies.length} sales document line(s) have delivered quantity mismatch vs delivery notes.`,
+      discrepancyCount: discrepancies.length,
+      details: discrepancies.slice(0, 10),
+    });
+  } catch (err: any) {
+    checks.push({
+      code: 'delivered_quantity_sync',
+      name: 'Delivered Quantity vs Delivery Note Items',
+      status: 'fail',
+      summary: `Check failed to execute: ${err.message}`,
+      discrepancyCount: 1,
+    });
+  }
+
+  // ── Check 12: Product Average Cost vs Ledger Replay ─────────────────────────
+  try {
+    const res = await db.execute<{
+      product_id: string;
+      sku: string;
+      name: string;
+      product_avg_cost: string;
+      replayed_avg_cost: string;
+    }>(sql`
+      WITH receipt_totals AS (
+        SELECT
+          product_id,
+          SUM(quantity * unit_cost_minor) AS total_val,
+          SUM(quantity) AS total_qty
+        FROM stock_movements
+        WHERE movement_type IN ('purchase_receipt', 'opening_balance')
+          AND quantity > 0
+        GROUP BY product_id
+      )
+      SELECT
+        p.id AS product_id,
+        p.sku,
+        p.name,
+        p.avg_cost_minor::text AS product_avg_cost,
+        CASE WHEN rt.total_qty > 0 THEN (rt.total_val / rt.total_qty)::bigint::text ELSE '0' END AS replayed_avg_cost
+      FROM products p
+      JOIN receipt_totals rt ON rt.product_id = p.id
+      WHERE rt.total_qty > 0
+        AND ABS(p.avg_cost_minor - (rt.total_val / rt.total_qty)) > 5
+    `);
+
+    const discrepancies = res.rows.map((r) => ({
+      productId: r.product_id,
+      sku: r.sku,
+      name: r.name,
+      productAvgCostMinor: Number(r.product_avg_cost),
+      replayedAvgCostMinor: Number(r.replayed_avg_cost),
+    }));
+
+    checks.push({
+      code: 'avg_cost_ledger_replay',
+      name: 'Product Average Cost vs Ledger Replay',
+      status: discrepancies.length === 0 ? 'pass' : 'fail',
+      summary: discrepancies.length === 0
+        ? 'All active product average costs match the mathematical replay of stock movement receipts.'
+        : `${discrepancies.length} product(s) have average cost deviating from stock movements ledger replay.`,
+      discrepancyCount: discrepancies.length,
+      details: discrepancies.slice(0, 10),
+    });
+  } catch (err: any) {
+    checks.push({
+      code: 'avg_cost_ledger_replay',
+      name: 'Product Average Cost vs Ledger Replay',
+      status: 'fail',
+      summary: `Check failed to execute: ${err.message}`,
+      discrepancyCount: 1,
+    });
+  }
+
   const durationMs = Date.now() - startTime;
   const passedCount = checks.filter((c) => c.status === 'pass').length;
   const warningCount = checks.filter((c) => c.status === 'warning').length;
@@ -335,4 +677,3 @@ export async function getSystemChecksHistory(limit = 20) {
     },
   });
 }
-

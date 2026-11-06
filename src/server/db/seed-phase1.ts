@@ -19,8 +19,9 @@ import {
   purchaseOrders,
   purchaseOrderItems,
   stockMovements,
+  taxRates,
 } from '@/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { executeStockMovements } from '@/server/services/stock/stock-engine';
 import { getNextDocNumber } from '@/server/services/sequences';
 
@@ -99,6 +100,10 @@ async function main() {
   // 5. Products
   console.log('[seed-phase1] Ensuring products...');
 
+  const defaultTaxRate = await db.query.taxRates.findFirst({
+    where: and(eq(taxRates.isDefault, true), eq(taxRates.isActive, true)),
+  });
+
   // Standard Item: Wireless Mouse
   await db
     .insert(products)
@@ -109,6 +114,7 @@ async function main() {
       description: 'Compact wireless optical mouse with USB nano receiver',
       categoryId: accCat?.id,
       uomId: eachUom!.id,
+      taxRateId: defaultTaxRate?.id,
       productType: 'standard',
       avgCostMinor: 0,
       lastCostMinor: 0,
@@ -131,6 +137,7 @@ async function main() {
       description: 'Intel Core i5-1335U, 16GB RAM, 512GB SSD, Windows 11 Pro',
       categoryId: compCat?.id,
       uomId: eachUom!.id,
+      taxRateId: defaultTaxRate?.id,
       productType: 'standard',
       avgCostMinor: 0,
       lastCostMinor: 0,
@@ -153,6 +160,7 @@ async function main() {
       description: 'Full OS installation, security updates and hardware diagnostic test',
       categoryId: servCat?.id,
       uomId: hrUom!.id,
+      taxRateId: defaultTaxRate?.id,
       productType: 'service',
       avgCostMinor: 0,
       lastCostMinor: 0,
@@ -175,6 +183,7 @@ async function main() {
       description: 'Complete productivity bundle: Dell Latitude Laptop + Logitech Mouse',
       categoryId: bdlCat?.id,
       uomId: eachUom!.id,
+      taxRateId: defaultTaxRate?.id,
       productType: 'bundle',
       avgCostMinor: 0,
       lastCostMinor: 0,

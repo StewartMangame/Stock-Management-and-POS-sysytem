@@ -117,6 +117,12 @@ const NAV_GROUPS: NavItem[] = [
     ],
   },
   {
+    label: 'Accounting',
+    href: '/accounting/batches',
+    icon: BookOpen,
+    permission: PERMISSIONS.ACCOUNTING_VIEW,
+  },
+  {
     label: 'Settings',
     icon: Settings,
     permission: PERMISSIONS.SETTINGS_VIEW,
@@ -129,7 +135,6 @@ const NAV_GROUPS: NavItem[] = [
       { label: 'Exceptions', href: '/admin/exceptions', permission: PERMISSIONS.PAYMENTS_EXCEPTIONS },
       { label: 'Audit Log', href: '/admin/audit-log', permission: PERMISSIONS.AUDIT_LOG_VIEW },
       { label: 'System Checks', href: '/admin/system-checks', permission: PERMISSIONS.SYSTEM_CHECKS_RUN },
-      { label: 'Accounting Export', href: '/admin/accounting', permission: PERMISSIONS.ACCOUNTING_VIEW },
     ],
   },
 ];

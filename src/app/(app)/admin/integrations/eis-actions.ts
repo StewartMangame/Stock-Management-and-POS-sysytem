@@ -14,7 +14,7 @@ import { revalidatePath } from 'next/cache';
 import { getNow } from '@/lib/timezone';
 
 export async function resendEisSubmissionAction(submissionId: string) {
-  const actor = await authorize(PERMISSIONS.SETTINGS_MANAGE);
+  const actor = await authorize(PERMISSIONS.EIS_MANAGE);
 
   const [sub] = await db
     .select()
@@ -53,7 +53,7 @@ export async function correctAndResendEisSubmissionAction(
   submissionId: string,
   correctedPayload: Record<string, unknown>,
 ) {
-  const actor = await authorize(PERMISSIONS.SETTINGS_MANAGE);
+  const actor = await authorize(PERMISSIONS.EIS_MANAGE);
 
   const [sub] = await db
     .select()

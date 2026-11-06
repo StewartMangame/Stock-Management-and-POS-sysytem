@@ -17,6 +17,7 @@ import {
   locations,
   stockMovements,
   serialNumbers,
+  taxRates,
 } from '@/server/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { parseKwachaToMinor } from '@/lib/money';
@@ -171,6 +172,13 @@ export async function commitProductsCsv(csvContent: string, actorId?: string) {
   const existingUoms = await db.query.unitsOfMeasure.findMany();
   const uomMap = new Map(existingUoms.map((u) => [u.code.toUpperCase(), u.id]));
 
+  const [defaultTaxRate] = await db
+    .select({ id: taxRates.id })
+    .from(taxRates)
+    .where(and(eq(taxRates.isDefault, true), eq(taxRates.isActive, true)))
+    .limit(1);
+  const defaultTaxRateId = defaultTaxRate?.id ?? null;
+
   return await db.transaction(async (tx) => {
     let imported = 0;
     for (const r of preview.rows) {
@@ -190,6 +198,7 @@ export async function commitProductsCsv(csvContent: string, actorId?: string) {
         description: d.description?.trim() || null,
         categoryId: catId || null,
         uomId,
+        taxRateId: defaultTaxRateId,
         productType: pType,
         sellingPriceMinor,
         minStockAlert: d.min_stock_alert ? String(d.min_stock_alert) : '0',

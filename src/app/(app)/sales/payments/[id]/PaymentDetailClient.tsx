@@ -29,6 +29,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { EntityHistoryTab } from '@/components/shared/EntityHistoryTab';
 
 export function PaymentDetailClient({
   payment,
@@ -376,6 +377,9 @@ export function PaymentDetailClient({
           </div>
         )}
       </div>
+
+      {/* Historical Audit Log Timeline */}
+      <EntityHistoryTab entityType="payment" entityId={payment.id} />
 
       {/* Reverse Modal */}
       {showReverseModal && (

@@ -235,7 +235,7 @@ export function ReportViewer({
       </div>
 
       {/* Extra sections */}
-      {extraSections}
+      {extraSections && <div key="report-extra-sections">{extraSections}</div>}
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
   reconciliationMatches,
   statementMappingProfiles,
   payments,
+  customers,
 } from '@/server/db/schema';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { writeAuditLog } from '@/server/services/audit';
@@ -443,10 +444,25 @@ export async function recordPaymentFromStatementLine(
       throw new Error(`Statement line '${statementLineId}' has already been matched.`);
     }
 
+    // Never allow walk-in customer for statement line payments
+    const [customer] = await tx
+      .select({ id: customers.id, isWalkIn: customers.isWalkIn, name: customers.name })
+      .from(customers)
+      .where(eq(customers.id, customerId));
+    if (!customer) throw new Error(`Customer '${customerId}' not found.`);
+    if (customer.isWalkIn) {
+      throw new Error('Payments cannot be recorded from statement lines for walk-in customers. Assign to an account customer.');
+    }
+
     const today = todayInCompanyTz();
     const paymentDate = line.transactionDate
       ? new Date(line.transactionDate).toISOString().slice(0, 10)
       : today;
+
+    const isCustomerCredit = allocations.length === 0;
+    const noteText = isCustomerCredit
+      ? `Customer credit recorded from statement line: ${line.description || line.reference || 'Unallocated'}`
+      : (line.description ? `Recorded from statement line: ${line.description}` : 'Recorded from bank statement line');
 
     // 2. Record payment with tx
     const bankRef = line.reference || `STMT-${line.id.slice(0, 8)}`;
@@ -463,7 +479,7 @@ export async function recordPaymentFromStatementLine(
         methodDetails: {
           bank_reference: bankRef,
         },
-        notes: line.description ? `Recorded from statement: ${line.description}` : 'Recorded from bank statement',
+        notes: noteText,
         allocations,
       },
       userId,
@@ -496,7 +512,7 @@ export async function recordPaymentFromStatementLine(
       })
       .where(eq(payments.id, payment.id));
 
-    return payment;
+    return { ...payment, reconciliationStatus: 'reconciled' };
   });
 }
 

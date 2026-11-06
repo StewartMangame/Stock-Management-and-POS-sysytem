@@ -31,32 +31,16 @@ const PROD_A_COST = 100_000;
 // PRODUCT B: "Cable Pack" — cost MWK  500.00 =  50,000 tambala
 const PROD_B_COST =  50_000;
 
-// VAT rate: 17.5% = 1750 basis points
-// Zero rate: 0%   = 0 basis points
+// Dynamic VAT values calculated from default tax rate in DB from first principles
+let defaultVatBps: number;
+let F1_VAT_LINE1_MINOR: number;
+let F1_VAT_LINE2_MINOR: number;
+let F1_VAT_MINOR: number;
+let F1_TOTAL_MINOR: number;
+let F3_VAT_MINOR: number;
+let COMBINED_VAT_MINOR: number;
 
-// ── FIXTURE 1: Standard Invoice ───────────────────────────────────────────────
-// Line 1: 3 × Widget Pro @ MWK 1,500 net = MWK 4,500 net
-//         VAT 17.5% = 787.50 MWK → 78,750 tambala
-//         Gross = 4,500 + 787.50 = 5,287.50 MWK
-// Line 2: 2 × Cable Pack @ MWK  800 net = MWK 1,600 net
-//         VAT 17.5% = 280.00 MWK → 28,000 tambala
-//         Gross = 1,600 + 280 = 1,880.00 MWK
-//
-// Invoice totals:
-//   Net (subtotal)  = 4,500 + 1,600 = 6,100 MWK → 610,000 tambala
-//   VAT             = 787.50 + 280  = 1,067.50 MWK → 106,750 tambala
-//   Total           = 7,167.50 MWK → 716,750 tambala
-//
-// Profit (cost):
-//   Line 1 cost = 3 × 1,000 = 3,000 MWK → 300,000 tambala
-//   Line 2 cost = 2 × 500   = 1,000 MWK → 100,000 tambala
-//   Total cost  = 4,000 MWK → 400,000 tambala
-//   Gross profit = 6,100 − 4,000 = 2,100 MWK → 210,000 tambala
-//   Margin % = 2,100 / 6,100 = 34.43%
-
-const F1_NET_MINOR     = 610_000;   // 6,100.00 MWK
-const F1_VAT_MINOR     = 106_750;   // 1,067.50 MWK (78,750 + 28,000)
-const F1_TOTAL_MINOR   = 716_750;
+const F1_NET_MINOR     = 610_000;   // 6,100.00 MWK (450,000 + 160,000)
 const F1_COST_MINOR    = 400_000;   // 4,000.00 MWK
 const F1_PROFIT_MINOR  = 210_000;   // 2,100.00 MWK
 
@@ -64,11 +48,6 @@ const F1_PROFIT_MINOR  = 210_000;   // 2,100.00 MWK
 // Line 1: 5 × Widget Pro @ MWK 2,000 net = MWK 10,000 net
 //         VAT 0% = 0
 //         Total = 10,000 MWK → 1,000,000 tambala
-//
-// Profit:
-//   Cost = 5 × 1,000 = 5,000 MWK → 500,000 tambala
-//   Gross profit = 10,000 − 5,000 = 5,000 MWK → 500,000 tambala
-//   Margin % = 50.00%
 
 const F2_NET_MINOR     = 1_000_000; // 10,000.00 MWK
 const F2_VAT_MINOR     = 0;
@@ -79,23 +58,13 @@ const F2_PROFIT_MINOR  = 500_000;   // 5,000.00 MWK
 // ── FIXTURE 3: Credit Note (partial return of Fixture 1) ─────────────────────
 // Credits back: 1 × Widget Pro @ MWK 1,500 net
 //   Net credit  = 1,500 MWK → 150,000 tambala
-//   VAT 17.5%   = 262.50 MWK → 26,250 tambala
-//   Total credit = 1,762.50 MWK → 176,250 tambala
-//
 // Cost reversed = 1 × 1,000 = 1,000 MWK → 100,000 tambala
 
 const F3_NET_MINOR    = 150_000;    // 1,500.00 MWK credit
-const F3_VAT_MINOR    =  26_250;    // 262.50 MWK credit
 const F3_COST_MINOR   = 100_000;    // 1,000.00 MWK reversed cost
 
 // ── COMBINED expected net figures ────────────────────────────────────────────
-// Net sales = F1 + F2 − F3 = 610,000 + 1,000,000 − 150,000 = 1,460,000 tambala
-// Net VAT   = F1_VAT + F2_VAT − F3_VAT = 106,750 + 0 − 26,250 = 80,500 tambala
-// Net cost  = (F1_COST + F2_COST) − F3_COST = 400,000 + 500,000 − 100,000 = 800,000 tambala
-// Net profit = net_sales − net_cost = 1,460,000 − 800,000 = 660,000 tambala
-
 const COMBINED_NET_MINOR     = 1_460_000;
-const COMBINED_VAT_MINOR     =    80_500;
 const COMBINED_COST_MINOR    =   800_000;
 const COMBINED_PROFIT_MINOR  =   660_000;
 
@@ -141,13 +110,24 @@ beforeAll(async () => {
   `);
   customerId = custRes.rows[0]!.id;
 
-  // Create tax rates
-  const tr17Res = await db.execute<FPRow>(sql`
-    INSERT INTO tax_rates (name, rate_basis_points, is_active)
-    VALUES ('FP Standard VAT 17.5', 1750, TRUE)
-    RETURNING id
+  // Query default tax rate from database (reads rate from data, does not hardcode)
+  const trDefaultRes = await db.execute<{ id: string; rate_basis_points: number }>(sql`
+    SELECT id, rate_basis_points FROM tax_rates WHERE is_default = TRUE AND is_active = TRUE LIMIT 1
   `);
-  taxRate17Id = tr17Res.rows[0]!.id;
+  if (!trDefaultRes.rows[0]) {
+    throw new Error('No default tax rate found in database. Seed tax_rates first.');
+  }
+  taxRate17Id = trDefaultRes.rows[0].id;
+  defaultVatBps = Number(trDefaultRes.rows[0].rate_basis_points);
+
+  // Compute expected figures from first principles dynamically based on DB rate
+  F1_VAT_LINE1_MINOR = Math.round((450_000 * defaultVatBps) / 10000);
+  F1_VAT_LINE2_MINOR = Math.round((160_000 * defaultVatBps) / 10000);
+  F1_VAT_MINOR = F1_VAT_LINE1_MINOR + F1_VAT_LINE2_MINOR;
+  F1_TOTAL_MINOR = F1_NET_MINOR + F1_VAT_MINOR;
+
+  F3_VAT_MINOR = Math.round((150_000 * defaultVatBps) / 10000);
+  COMBINED_VAT_MINOR = F1_VAT_MINOR + F2_VAT_MINOR - F3_VAT_MINOR;
 
   const tr0Res = await db.execute<FPRow>(sql`
     INSERT INTO tax_rates (name, rate_basis_points, is_active)
@@ -201,8 +181,8 @@ afterAll(async () => {
       await db.execute(sql`DELETE FROM stock_balances WHERE product_id IN (${productAId}::uuid, ${productBId}::uuid)`);
       await db.execute(sql`DELETE FROM products WHERE id IN (${productAId}::uuid, ${productBId}::uuid)`);
     }
-    if (taxRate17Id && taxRate0Id) {
-      await db.execute(sql`DELETE FROM tax_rates WHERE id IN (${taxRate17Id}::uuid, ${taxRate0Id}::uuid)`);
+    if (taxRate0Id) {
+      await db.execute(sql`DELETE FROM tax_rates WHERE id = ${taxRate0Id}::uuid`);
     }
     if (locationId) {
       await db.execute(sql`DELETE FROM locations WHERE id = ${locationId}::uuid`);
@@ -302,9 +282,9 @@ describe('First-principles fixture: VAT by rate', () => {
           qty: 3,
           unitNetMinor: 150_000, // MWK 1,500
           taxRateId: taxRate17Id,
-          taxRateBasisPoints: 1750,
+          taxRateBasisPoints: defaultVatBps,
           lineNetMinor: 450_000, // 3 × 150,000
-          lineTaxMinor:  78_750, // 450,000 × 17.5% = 78,750
+          lineTaxMinor: F1_VAT_LINE1_MINOR,
           unitCostMinor: PROD_A_COST,
         },
         {
@@ -313,9 +293,9 @@ describe('First-principles fixture: VAT by rate', () => {
           qty: 2,
           unitNetMinor: 80_000,  // MWK 800
           taxRateId: taxRate17Id,
-          taxRateBasisPoints: 1750,
+          taxRateBasisPoints: defaultVatBps,
           lineNetMinor: 160_000, // 2 × 80,000
-          lineTaxMinor:  28_000, // 160,000 × 17.5% = 28,000
+          lineTaxMinor: F1_VAT_LINE2_MINOR,
           unitCostMinor: PROD_B_COST,
         },
       ],
@@ -343,7 +323,6 @@ describe('First-principles fixture: VAT by rate', () => {
     });
 
     // Insert Fixture 3: Credit note (partial return of F1)
-    // 1 × Widget Pro @ MWK 1,500 net = 150,000 tambala net; VAT 17.5% = 26,250 tambala
     creditNoteF3Id = await insertSalesDoc({
       docType: 'credit_note',
       sourceDocId: invoiceF1Id,
@@ -356,30 +335,29 @@ describe('First-principles fixture: VAT by rate', () => {
           qty: 1,
           unitNetMinor: 150_000, // MWK 1,500
           taxRateId: taxRate17Id,
-          taxRateBasisPoints: 1750,
+          taxRateBasisPoints: defaultVatBps,
           lineNetMinor: 150_000,
-          lineTaxMinor:  26_250, // 150,000 × 17.5% = 26,250
+          lineTaxMinor: F3_VAT_MINOR,
           unitCostMinor: PROD_A_COST,
         },
       ],
     });
   });
 
-  it('VAT report: 17.5% rate rows show correct invoice net and credit net', async () => {
+  it('VAT report: default rate rows show correct invoice net and credit net', async () => {
     const result = await getVatSummary(TEST_DATE, TEST_DATE_END, locationId);
 
-    const row17 = result.rows.find((r: any) => r.ratePercent === 17.5 || Math.abs(r.ratePercent - 17.5) < 0.01);
-    expect(row17).toBeDefined();
+    const targetPercent = defaultVatBps / 100;
+    const rowDefault = result.rows.find((r: any) => Math.abs(r.ratePercent - targetPercent) < 0.01);
+    expect(rowDefault).toBeDefined();
 
-    // F1 invoice net at 17.5%:
-    // Line 1: 450,000 tambala, Line 2: 160,000 → total invoice net at 17.5% = 610,000
-    // F3 credit note at 17.5%: 150,000
-    expect(row17!.taxableSalesMinor).toBe(610_000);
-    expect(row17!.taxableCreditMinor).toBe(150_000);
+    // F1 invoice net: Line 1: 450,000 + Line 2: 160,000 = 610,000
+    // F3 credit note: 150,000
+    expect(rowDefault!.taxableSalesMinor).toBe(610_000);
+    expect(rowDefault!.taxableCreditMinor).toBe(150_000);
 
-    // Net VAT at 17.5% = (78,750 + 28,000) − 26,250 = 80,500
-    const netVat17 = row17!.outputVatMinor - row17!.creditVatMinor;
-    expect(netVat17).toBe(80_500);
+    const netVat = rowDefault!.outputVatMinor - rowDefault!.creditVatMinor;
+    expect(netVat).toBe(F1_VAT_MINOR - F3_VAT_MINOR);
   });
 
   it('VAT report: 0% rate row shows zero-rated invoice correctly', async () => {

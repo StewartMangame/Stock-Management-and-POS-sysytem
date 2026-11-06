@@ -66,6 +66,7 @@ export const PERMISSIONS = {
   ACCOUNTING_VIEW: 'accounting:view',
   ACCOUNTING_EXPORT: 'accounting:export',
   ACCOUNTING_REEXPORT: 'accounting:reexport', // Manager override for second export
+  EIS_MANAGE: 'eis:manage',
 
   // ── System checks ─────────────────────────────────────────────────────
   SYSTEM_CHECKS_RUN: 'system_checks:run',
@@ -117,6 +118,7 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     PERMISSIONS.REPORTS_VIEW, PERMISSIONS.REPORTS_COST,
     // Accounting
     PERMISSIONS.ACCOUNTING_VIEW, PERMISSIONS.ACCOUNTING_EXPORT, PERMISSIONS.ACCOUNTING_REEXPORT,
+    PERMISSIONS.EIS_MANAGE,
     // System checks
     PERMISSIONS.SYSTEM_CHECKS_RUN,
     // Approvals

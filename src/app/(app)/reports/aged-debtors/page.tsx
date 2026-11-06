@@ -4,6 +4,7 @@ import { PERMISSIONS } from '@/lib/permissions';
 import { getAgedDebtors } from '@/server/services/reports/aged-debtors';
 import { getLocations } from '@/server/services/locations';
 import { formatTambala } from '@/lib/money';
+import { todayInCompanyTz } from '@/lib/timezone';
 import Link from 'next/link';
 import { Download, Calendar, Filter, FileText } from 'lucide-react';
 import { AgedDebtorsClient } from './AgedDebtorsClient';
@@ -19,8 +20,8 @@ export default async function AgedDebtorsPage({
   await authorize(PERMISSIONS.REPORTS_VIEW);
 
   const params = await searchParams;
-  const asOf = params.asOf || new Date().toISOString().slice(0, 10);
-  const locationId = params.locationId || undefined;
+  const asOf = params.asOf && params.asOf.trim() !== '' ? params.asOf.trim() : todayInCompanyTz();
+  const locationId = params.locationId && params.locationId.trim() !== '' ? params.locationId.trim() : undefined;
 
   const report = await getAgedDebtors(asOf, locationId);
   const locations = await getLocations();

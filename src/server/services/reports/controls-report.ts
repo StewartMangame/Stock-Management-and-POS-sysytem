@@ -80,7 +80,7 @@ export async function getControlsReport(
     LEFT JOIN users u ON u.id = al.user_id
     WHERE al.at >= ${fromInstant}
       AND al.at < ${toInstant}
-      AND al.action = ANY(${CONTROLS_ACTIONS})
+      AND al.action IN (${sql.join(CONTROLS_ACTIONS.map((a) => sql`${a}`), sql`, `)})
     ORDER BY al.at DESC
   `);
 

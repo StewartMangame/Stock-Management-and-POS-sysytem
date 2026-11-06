@@ -25,6 +25,8 @@ const SETTING_META: Record<SettingKey, { label: string; description: string; typ
   reservation_hold_days:                { label: 'Reservation Hold Days',                description: 'Default days stock reservations are held on acceptance',   type: 'number' },
   pos_blind_cash_up:                    { label: 'Blind Cash-Up',                        description: 'Hide expected cash and sales totals from cashiers during shift close', type: 'boolean' },
   pos_return_window_days:               { label: 'POS Return Window (Days)',             description: 'Maximum days allowed for customer returns without manager approval', type: 'number' },
+  cost_variance_threshold_percent:     { label: 'Cost Variance Threshold (%)',          description: 'Goods receipt unit cost variance vs average triggering manager confirmation (default 300%)', type: 'number' },
+  cost_above_selling_price_threshold_percent: { label: 'Cost Above Selling Price Threshold (%)', description: 'Goods receipt unit cost exceeding selling price by more than this % requires manager confirmation (default 100%)', type: 'number' },
 };
 
 export default async function SettingsPage() {
@@ -51,7 +53,7 @@ export default async function SettingsPage() {
     },
     {
       title: 'Stock & Costing',
-      keys: ['allow_negative_stock', 'costing_method'] as SettingKey[],
+      keys: ['allow_negative_stock', 'costing_method', 'cost_variance_threshold_percent', 'cost_above_selling_price_threshold_percent'] as SettingKey[],
     },
     {
       title: 'Integrations',

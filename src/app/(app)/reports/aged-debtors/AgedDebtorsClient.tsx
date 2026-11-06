@@ -21,18 +21,18 @@ export function AgedDebtorsClient({ report }: { report: any }) {
       'Net Due (MWK)',
     ];
 
-    const rows = report.rows.map((r: any) => [
-      `"${r.customerName.replace(/"/g, '""')}"`,
-      r.accountNumber,
-      (r.creditLimitMinor / 100).toFixed(2),
-      (r.currentMinor / 100).toFixed(2),
-      (r.days1_30Minor / 100).toFixed(2),
-      (r.days31_60Minor / 100).toFixed(2),
-      (r.days61_90Minor / 100).toFixed(2),
-      (r.days90plusMinor / 100).toFixed(2),
-      (r.totalOutstandingMinor / 100).toFixed(2),
-      (r.customerCreditMinor / 100).toFixed(2),
-      (r.netDueMinor / 100).toFixed(2),
+    const rows = (report.rows || []).map((r: any) => [
+      `"${(r.customerName || 'Unknown').replace(/"/g, '""')}"`,
+      r.accountNumber || '',
+      (Number(r.creditLimitMinor || 0) / 100).toFixed(2),
+      (Number(r.currentMinor || 0) / 100).toFixed(2),
+      (Number(r.days1_30Minor || 0) / 100).toFixed(2),
+      (Number(r.days31_60Minor || 0) / 100).toFixed(2),
+      (Number(r.days61_90Minor || 0) / 100).toFixed(2),
+      (Number(r.days90plusMinor || 0) / 100).toFixed(2),
+      (Number(r.totalOutstandingMinor || 0) / 100).toFixed(2),
+      (Number(r.customerCreditMinor || 0) / 100).toFixed(2),
+      (Number(r.netDueMinor || 0) / 100).toFixed(2),
     ]);
 
     rows.push([

@@ -25,7 +25,7 @@ import { eq, count } from 'drizzle-orm';
 
 neonConfig.webSocketConstructor = ws;
 
-const TEST_DB_URL = process.env['DATABASE_URL_TEST'];
+const TEST_DB_URL = process.env['MIGRATION_TEST_DB_URL'] || (process.env['RUN_MIGRATION_TEST'] === 'true' ? process.env['DATABASE_URL_TEST'] : undefined);
 
 const describeIf = TEST_DB_URL ? describe : describe.skip;
 

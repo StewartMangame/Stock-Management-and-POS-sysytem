@@ -561,17 +561,30 @@ describe('Phase 4 — Counter POS & Shift Reconciliation', () => {
   });
 
   it('7. Manager Override Security: manager cannot self-approve; 5 failed PIN attempts triggers lockout', async () => {
+    // Dedicated isolated manager specifically for Test 7 lockout test
+    const [managerRole] = await db.select().from(roles).where(eq(roles.name, 'manager'));
+    const [lockoutManager] = await db
+      .insert(users)
+      .values({
+        name: `Lockout Manager ${Date.now()}`,
+        email: `lockout-${Date.now()}@test.local`,
+        passwordHash: 'dummy',
+        roleId: managerRole!.id,
+      })
+      .returning();
+    const LOCKOUT_PIN = String(Math.floor(100000 + Math.random() * 900000));
+    await setUserPin(lockoutManager!.id, LOCKOUT_PIN);
+
     // 1. Manager acting as cashier cannot approve their own override (self-override prevention)
-    // testManagerId has pos:override permission but PIN matches → self-override check fires
     await expect(
       verifyManagerOverride({
-        pin: MANAGER_PIN,
-        cashierUserId: testManagerId, // manager is the cashier — self-approve attempt
+        pin: LOCKOUT_PIN,
+        cashierUserId: lockoutManager!.id, // manager is the cashier — self-approve attempt
         action: 'pos:discount',
       }),
     ).rejects.toThrow(/cannot be approved by the cashier/);
 
-    // 2. Failed attempts with wrong PIN increment counter (cashier as requesting user is fine for lockout test)
+    // 2. Failed attempts with wrong PIN increment counter
     for (let i = 0; i < 4; i++) {
       await expect(
         verifyManagerOverride({
@@ -590,6 +603,9 @@ describe('Phase 4 — Counter POS & Shift Reconciliation', () => {
         action: 'pos:discount',
       }),
     ).rejects.toThrow();
+
+    // Clean up isolated lockout manager
+    await db.update(users).set({ isActive: false }).where(eq(users.id, lockoutManager!.id));
   });
 
   it('8. Payment Applied Exact Match: applied payments must sum exactly to document total; non-cash overpayment rejected', async () => {
