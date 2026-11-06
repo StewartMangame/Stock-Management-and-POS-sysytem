@@ -35,6 +35,7 @@ export interface CreateQuotationLineInput {
   unitPriceMinor: number;
   discountMinor?: number;
   taxRateId?: string;
+  description?: string;
   notes?: string;
 }
 
@@ -100,7 +101,7 @@ export async function createQuotation(input: CreateQuotationInput, userId?: stri
       taxRateId: t.id,
       productId: p.id,
       sku: p.sku,
-      description: p.description ?? p.name,
+      description: l.description !== undefined ? l.description : (p.description ?? p.name),
       notes: l.notes,
     };
   });

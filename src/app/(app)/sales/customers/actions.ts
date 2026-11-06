@@ -10,7 +10,6 @@ import {
 } from '@/server/services/sales/customers';
 
 export interface CustomerFormData {
-  accountNumber?: string;
   name: string;
   customerType: 'individual' | 'business';
   email?: string;

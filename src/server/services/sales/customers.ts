@@ -8,6 +8,7 @@
  *   - Foreign key integrity guards
  */
 
+import { randomBytes } from 'node:crypto';
 import { db, type DbTransaction } from '@/server/db';
 import { customers, salesDocuments, serialNumbers } from '@/server/db/schema';
 import { eq, and, sql, ilike, desc, or } from 'drizzle-orm';
@@ -131,7 +132,6 @@ export async function getCustomerCreditStatus(
 
 export async function createCustomer(
   data: {
-    accountNumber?: string;
     name: string;
     customerType?: 'individual' | 'business';
     email?: string;
@@ -143,12 +143,9 @@ export async function createCustomer(
   },
   userId?: string,
 ) {
-  // If account number is not provided, generate a formatted account number: CUST-YYYYMM-XXXX
-  const accountNumber =
-    data.accountNumber ||
-    `CUST-${new Date().toISOString().slice(0, 7).replace('-', '')}-${Math.floor(
-      1000 + Math.random() * 9000,
-    )}`;
+  const accountNumber = `CUST-${new Date().toISOString().slice(0, 7).replace('-', '')}-${randomBytes(6)
+    .toString('hex')
+    .toUpperCase()}`;
 
   const [created] = await db
     .insert(customers)

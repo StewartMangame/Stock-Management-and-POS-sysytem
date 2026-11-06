@@ -12,8 +12,10 @@ export const metadata: Metadata = {
 };
 
 export default async function NewQuotationPage() {
+  let canCreateCustomers = false;
   try {
-    await authorize(PERMISSIONS.QUOTATIONS_MANAGE);
+    const actor = await authorize(PERMISSIONS.QUOTATIONS_MANAGE);
+    canCreateCustomers = actor.role.permissions.includes(PERMISSIONS.CUSTOMERS_MANAGE);
   } catch {
     redirect('/sales/quotations');
   }
@@ -23,6 +25,7 @@ export default async function NewQuotationPage() {
       id: customers.id,
       name: customers.name,
       accountNumber: customers.accountNumber,
+      address: customers.address,
       isWalkIn: customers.isWalkIn,
       creditLimitMinor: customers.creditLimitMinor,
     })
@@ -58,6 +61,7 @@ export default async function NewQuotationPage() {
   return (
     <QuotationForm
       customers={activeCustomers}
+      canCreateCustomers={canCreateCustomers}
       products={activeProducts}
       locations={locs}
       defaultTaxRateId={defaultTax?.id || ''}

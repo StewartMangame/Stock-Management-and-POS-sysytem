@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
@@ -23,14 +23,18 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Trash2, Plus, ArrowLeft, Calculator } from 'lucide-react';
+import { Trash2, Plus, ArrowLeft, Calculator, Eye, Edit3 } from 'lucide-react';
 import { createQuotationAction } from '../actions';
 import { calculateSalesLine, calculateDocumentTotals } from '@/lib/sales-math';
+import { QuotationDocumentView } from '@/components/quotations/QuotationDocumentView';
+import { CustomerDialog } from '../../customers/CustomerDialog';
+import type { Customer } from '@/server/services/sales/customers';
 
 interface CustomerOption {
   id: string;
   name: string;
   accountNumber: string;
+  address?: string | null;
   isWalkIn: boolean;
   creditLimitMinor: number;
 }
@@ -39,6 +43,7 @@ interface ProductOption {
   id: string;
   name: string;
   sku: string;
+  description?: string | null;
   sellingPriceMinor: number;
   taxRateId?: string | null;
   taxBasisPoints?: number;
@@ -51,6 +56,7 @@ interface LocationOption {
 
 interface QuotationFormProps {
   customers: CustomerOption[];
+  canCreateCustomers: boolean;
   products: ProductOption[];
   locations: LocationOption[];
   defaultTaxRateId: string;
@@ -61,31 +67,66 @@ interface FormLine {
   quantity: string;
   unitPriceMwk: string;
   discountMwk: string;
+  description: string;
 }
 
 export function QuotationForm({
   customers,
+  canCreateCustomers,
   products,
   locations,
   defaultTaxRateId,
 }: QuotationFormProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [activeTab, setActiveTab] = useState<'editor' | 'preview'>('editor');
 
+  const [customerOptions, setCustomerOptions] = useState(customers);
   const [customerId, setCustomerId] = useState('');
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
   const [locationId, setLocationId] = useState(locations[0]?.id || '');
   const [quotationDate, setQuotationDate] = useState(new Date().toISOString().slice(0, 10));
   const [validUntil, setValidUntil] = useState(
     new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
   );
   const [notes, setNotes] = useState('');
-  const [terms, setTerms] = useState('Payment within 30 days of invoice date. Prices valid for 30 days.');
+  const [terms, setTerms] = useState(
+    'Payment within 30 days of invoice date. Prices valid for 30 days.',
+  );
 
   const [lines, setLines] = useState<FormLine[]>([
-    { productId: '', quantity: '1', unitPriceMwk: '', discountMwk: '0' },
+    { productId: '', quantity: '1', unitPriceMwk: '', discountMwk: '0', description: '' },
   ]);
 
-  const selectedCustomer = customers.find((c) => c.id === customerId);
+  const selectedCustomer = customerOptions.find((c) => c.id === customerId);
+  const filteredCustomers = useMemo(() => {
+    const query = customerSearch.trim().toLowerCase();
+    if (!query) return customerOptions;
+    return customerOptions.filter((customer) =>
+      `${customer.name} ${customer.accountNumber}`.toLowerCase().includes(query),
+    );
+  }, [customerOptions, customerSearch]);
+
+  function selectCustomer(customer: CustomerOption) {
+    setCustomerId(customer.id);
+    setCustomerSearch(`${customer.name} (${customer.accountNumber})`);
+    setCustomerSearchOpen(false);
+  }
+
+  function handleCustomerCreated(customer: Customer) {
+    const newCustomer: CustomerOption = {
+      id: customer.id,
+      name: customer.name,
+      accountNumber: customer.accountNumber,
+      address: customer.address,
+      isWalkIn: customer.isWalkIn,
+      creditLimitMinor: customer.creditLimitMinor,
+    };
+    setCustomerOptions((previous) => [...previous, newCustomer]);
+    selectCustomer(newCustomer);
+  }
 
   // Helper map for fast product lookup
   const prodMap = new Map(products.map((p) => [p.id, p]));
@@ -98,6 +139,7 @@ export function QuotationForm({
         ...next[index]!,
         productId: pId,
         unitPriceMwk: prod ? (prod.sellingPriceMinor / 100).toFixed(2) : '',
+        description: prod?.description || prod?.name || '',
       };
       return next;
     });
@@ -114,7 +156,7 @@ export function QuotationForm({
   function addLine() {
     setLines((prev) => [
       ...prev,
-      { productId: '', quantity: '1', unitPriceMwk: '', discountMwk: '0' },
+      { productId: '', quantity: '1', unitPriceMwk: '', discountMwk: '0', description: '' },
     ]);
   }
 
@@ -175,6 +217,7 @@ export function QuotationForm({
               unitPriceMinor: Math.round((parseFloat(l.unitPriceMwk) || 0) * 100),
               discountMinor: Math.round((parseFloat(l.discountMwk) || 0) * 100),
               taxRateId: p?.taxRateId || defaultTaxRateId,
+              description: l.description || undefined,
             };
           }),
         };
@@ -188,9 +231,55 @@ export function QuotationForm({
     });
   }
 
+  // Construct preview data object for live QuotationDocumentView
+  const previewQuotation = {
+    quotationNumber: 'DRAFT',
+    status: 'draft',
+    quotationDate,
+    validUntil,
+    currency: 'MWK',
+    subtotalMinor: totals.subtotalMinor,
+    discountMinor: totals.discountMinor,
+    taxMinor: totals.taxMinor,
+    totalMinor: totals.totalMinor,
+    notes: notes || null,
+    terms: terms || null,
+    customer: {
+      name: selectedCustomer?.name || 'Customer Name',
+      accountNumber: selectedCustomer?.accountNumber || 'ACC-0000',
+      address: selectedCustomer?.address || null,
+    },
+    lines: lines
+      .filter((l) => l.productId)
+      .map((l, idx) => {
+        const p = prodMap.get(l.productId);
+        const qNum = parseFloat(l.quantity) || 0;
+        const pNum = parseFloat(l.unitPriceMwk) || 0;
+        const dNum = parseFloat(l.discountMwk) || 0;
+        const calc = calculateSalesLine({
+          quantity: qNum,
+          unitPriceMinor: Math.round(pNum * 100),
+          discountMinor: Math.round(dNum * 100),
+          taxRateBasisPoints: p?.taxBasisPoints ?? 1750,
+        });
+
+        return {
+          id: `preview-${idx}`,
+          sku: p?.sku || '',
+          productName: p?.name || '',
+          description: l.description || p?.name || '',
+          quantity: l.quantity,
+          unitPriceMinor: Math.round(pNum * 100),
+          discountMinor: Math.round(dNum * 100),
+          lineTotalMinor: calc.lineTotalMinor,
+        };
+      }),
+  };
+
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Top Header & Tab Controls */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <Button asChild variant="outline" size="sm" className="h-8 gap-1">
             <Link href="/sales/quotations">
@@ -200,257 +289,397 @@ export function QuotationForm({
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-ace-navy">New Quotation</h1>
             <p className="text-xs text-muted-foreground">
-              Create a proforma quotation with live tax calculation and component tracking.
+              Create a quotation with official Ace Holdings letterhead and live tax calculations.
             </p>
           </div>
         </div>
 
-        <Button
-          type="submit"
-          disabled={isPending}
-          className="bg-ace-gold text-ace-navy hover:bg-ace-gold/90 font-semibold shadow-sm"
-        >
-          {isPending ? 'Saving Quotation...' : 'Create Quotation'}
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Editor / Live Preview toggle */}
+          <div className="flex rounded-lg border bg-muted/30 p-0.5">
+            <button
+              type="button"
+              onClick={() => setActiveTab('editor')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                activeTab === 'editor'
+                  ? 'bg-white text-ace-navy shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Edit3 className="h-3.5 w-3.5" /> Editor
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('preview')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                activeTab === 'preview'
+                  ? 'bg-white text-ace-navy shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Eye className="h-3.5 w-3.5" /> Document Preview
+            </button>
+          </div>
+
+          <Button
+            type="submit"
+            disabled={isPending}
+            className="bg-ace-gold text-ace-navy hover:bg-ace-gold/90 font-semibold shadow-sm"
+          >
+            {isPending ? 'Saving Quotation...' : 'Create Quotation'}
+          </Button>
+        </div>
       </div>
 
-      {/* Header Fields Card */}
-      <Card className="shadow-sm">
-        <CardContent className="pt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="space-y-1">
-            <Label htmlFor="customer">Customer *</Label>
-            <Select value={customerId} onValueChange={setCustomerId}>
-              <SelectTrigger id="customer">
-                <SelectValue placeholder="Select a customer" />
-              </SelectTrigger>
-              <SelectContent>
-                {customers.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name} ({c.accountNumber})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {selectedCustomer && (
-              <p className="text-[11px] text-muted-foreground font-mono">
-                {selectedCustomer.isWalkIn
-                  ? 'Walk-in cash customer'
-                  : `Credit Limit: MWK ${(selectedCustomer.creditLimitMinor / 100).toLocaleString('en-MW', {
+      {activeTab === 'preview' ? (
+        <div className="py-2">
+          <div className="bg-slate-50/50 p-4 rounded-xl border mb-4 text-xs text-muted-foreground flex items-center justify-between">
+            <span>
+              Live letterhead preview of your quotation formatted exactly as it will appear when downloaded as PDF.
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setActiveTab('editor')}
+              className="h-7 text-xs"
+            >
+              Back to Form
+            </Button>
+          </div>
+          <QuotationDocumentView quotation={previewQuotation} className="shadow-lg" />
+        </div>
+      ) : (
+        <>
+          {/* Header Fields Card */}
+          <Card className="shadow-sm">
+            <CardContent className="pt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="customer">Customer *</Label>
+                <div className="relative">
+                  <Input
+                    id="customer"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded={customerSearchOpen}
+                    aria-controls="quotation-customer-options"
+                    autoComplete="off"
+                    placeholder="Search customers by name or account..."
+                    value={customerSearch}
+                    onFocus={() => setCustomerSearchOpen(true)}
+                    onBlur={() => {
+                      window.setTimeout(() => setCustomerSearchOpen(false), 150);
+                    }}
+                    onChange={(event) => {
+                      setCustomerSearch(event.target.value);
+                      setCustomerId('');
+                      setCustomerSearchOpen(true);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') setCustomerSearchOpen(false);
+                    }}
+                  />
+                  {customerSearchOpen && (
+                    <div
+                      id="quotation-customer-options"
+                      role="listbox"
+                      className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border bg-white p-1 shadow-lg"
+                    >
+                      {filteredCustomers.length > 0 ? (
+                        filteredCustomers.map((customer) => (
+                          <button
+                            key={customer.id}
+                            type="button"
+                            role="option"
+                            aria-selected={customer.id === customerId}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => selectCustomer(customer)}
+                            className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm hover:bg-muted"
+                          >
+                            <span>{customer.name}</span>
+                            <span className="ml-3 text-xs text-muted-foreground">
+                              {customer.accountNumber}
+                            </span>
+                          </button>
+                        ))
+                      ) : (
+                        <p className="px-3 py-2 text-sm text-muted-foreground">
+                          No matching customers found.
+                        </p>
+                      )}
+                      {canCreateCustomers && (
+                        <button
+                          type="button"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            setCustomerSearchOpen(false);
+                            setCustomerDialogOpen(true);
+                          }}
+                          className="flex w-full items-center gap-2 rounded border-t px-3 py-2 text-left text-sm font-medium text-ace-navy hover:bg-muted"
+                        >
+                          <Plus className="h-4 w-4" />
+                          {customerSearch.trim()
+                            ? `Create customer "${customerSearch.trim()}"`
+                            : 'Create a new customer'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {selectedCustomer && (
+                  <p className="text-[11px] text-muted-foreground font-mono">
+                    {selectedCustomer.isWalkIn
+                      ? 'Walk-in cash customer'
+                      : `Credit Limit: MWK ${(selectedCustomer.creditLimitMinor / 100).toLocaleString(
+                          'en-MW',
+                          {
+                            minimumFractionDigits: 2,
+                          },
+                        )}`}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="location">Branch / Location *</Label>
+                <Select value={locationId} onValueChange={setLocationId}>
+                  <SelectTrigger id="location">
+                    <SelectValue placeholder="Select location" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {locations.map((loc) => (
+                      <SelectItem key={loc.id} value={loc.id}>
+                        {loc.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="quoteDate">Quotation Date</Label>
+                <Input
+                  id="quoteDate"
+                  type="date"
+                  value={quotationDate}
+                  onChange={(e) => setQuotationDate(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="validUntil">Valid Until</Label>
+                <Input
+                  id="validUntil"
+                  type="date"
+                  value={validUntil}
+                  onChange={(e) => setValidUntil(e.target.value)}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Line Items Table */}
+          <Card className="shadow-sm overflow-hidden">
+            <CardHeader className="bg-muted/30 border-b py-3 flex flex-row items-center justify-between">
+              <CardTitle className="text-base font-semibold text-ace-navy">
+                Quotation Lines
+              </CardTitle>
+              <Button type="button" variant="outline" size="sm" onClick={addLine} className="h-8 gap-1">
+                <Plus className="h-3.5 w-3.5" /> Add Line
+              </Button>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader className="bg-muted/20">
+                  <TableRow>
+                    <TableHead className="w-[45%]">Product / Scope Description</TableHead>
+                    <TableHead className="w-[10%] text-right">Quantity</TableHead>
+                    <TableHead className="w-[17%] text-right">Unit Price (MWK)</TableHead>
+                    <TableHead className="w-[12%] text-right">Discount (MWK)</TableHead>
+                    <TableHead className="w-[12%] text-right">Line Total</TableHead>
+                    <TableHead className="w-[4%]"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {lines.map((line, idx) => {
+                    const prod = prodMap.get(line.productId);
+                    const qNum = parseFloat(line.quantity) || 0;
+                    const pNum = parseFloat(line.unitPriceMwk) || 0;
+                    const dNum = parseFloat(line.discountMwk) || 0;
+                    const lineCalc = calculateSalesLine({
+                      quantity: qNum,
+                      unitPriceMinor: Math.round(pNum * 100),
+                      discountMinor: Math.round(dNum * 100),
+                      taxRateBasisPoints: prod?.taxBasisPoints ?? 1750,
+                    });
+
+                    return (
+                      <TableRow key={idx}>
+                        <TableCell className="space-y-2 py-3">
+                          <Select
+                            value={line.productId}
+                            onValueChange={(val) => handleProductChange(idx, val)}
+                          >
+                            <SelectTrigger className="h-8 text-xs font-semibold">
+                              <SelectValue placeholder="Select product or service..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {products.map((p) => (
+                                <SelectItem key={p.id} value={p.id} className="text-xs">
+                                  <span className="font-semibold text-ace-navy mr-2">{p.sku}</span>
+                                  {p.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+
+                          <textarea
+                            value={line.description}
+                            onChange={(e) => handleLineChange(idx, 'description', e.target.value)}
+                            placeholder="Detailed description / scope of work (optional)..."
+                            rows={2}
+                            className="w-full text-xs p-2 rounded-md border border-input bg-transparent shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-slate-700"
+                          />
+                        </TableCell>
+                        <TableCell className="align-top py-3">
+                          <Input
+                            type="number"
+                            step="any"
+                            min="0.001"
+                            value={line.quantity}
+                            onChange={(e) => handleLineChange(idx, 'quantity', e.target.value)}
+                            className="h-8 text-right font-mono text-xs"
+                          />
+                        </TableCell>
+                        <TableCell className="align-top py-3">
+                          <Input
+                            type="number"
+                            step="any"
+                            min="0"
+                            value={line.unitPriceMwk}
+                            onChange={(e) => handleLineChange(idx, 'unitPriceMwk', e.target.value)}
+                            className="h-8 text-right font-mono text-xs"
+                            placeholder="0.00"
+                          />
+                        </TableCell>
+                        <TableCell className="align-top py-3">
+                          <Input
+                            type="number"
+                            step="any"
+                            min="0"
+                            value={line.discountMwk}
+                            onChange={(e) => handleLineChange(idx, 'discountMwk', e.target.value)}
+                            className="h-8 text-right font-mono text-xs"
+                            placeholder="0.00"
+                          />
+                        </TableCell>
+                        <TableCell className="align-top py-3 text-right font-mono font-medium text-xs">
+                          MWK{' '}
+                          {(lineCalc.lineTotalMinor / 100).toLocaleString('en-MW', {
+                            minimumFractionDigits: 2,
+                          })}
+                        </TableCell>
+                        <TableCell className="align-top py-3 text-center">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeLine(idx)}
+                            disabled={lines.length === 1}
+                            className="h-7 w-7 p-0 text-muted-foreground hover:text-rose-600"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          {/* Notes & Live Totals Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <Label htmlFor="notes">Client Notes</Label>
+                <Input
+                  id="notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="e.g. Server room equipment cleanup and cable migration"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="terms">Terms & Conditions</Label>
+                <Input
+                  id="terms"
+                  value={terms}
+                  onChange={(e) => setTerms(e.target.value)}
+                  placeholder="e.g. Valid for 30 days from date of issue"
+                />
+              </div>
+            </div>
+
+            {/* Live Financial Totals Summary */}
+            <Card className="shadow-sm bg-muted/20">
+              <CardHeader className="py-3 border-b">
+                <CardTitle className="text-sm font-semibold text-ace-navy flex items-center gap-1.5">
+                  <Calculator className="h-4 w-4" /> Live Financial Calculation
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-4 space-y-2.5 text-sm">
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Subtotal:</span>
+                  <span className="font-mono">
+                    MWK{' '}
+                    {(totals.subtotalMinor / 100).toLocaleString('en-MW', {
                       minimumFractionDigits: 2,
-                    })}`}
-              </p>
-            )}
-          </div>
-
-          <div className="space-y-1">
-            <Label htmlFor="location">Branch / Location *</Label>
-            <Select value={locationId} onValueChange={setLocationId}>
-              <SelectTrigger id="location">
-                <SelectValue placeholder="Select location" />
-              </SelectTrigger>
-              <SelectContent>
-                {locations.map((loc) => (
-                  <SelectItem key={loc.id} value={loc.id}>
-                    {loc.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1">
-            <Label htmlFor="quoteDate">Quotation Date</Label>
-            <Input
-              id="quoteDate"
-              type="date"
-              value={quotationDate}
-              onChange={(e) => setQuotationDate(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-1">
-            <Label htmlFor="validUntil">Valid Until</Label>
-            <Input
-              id="validUntil"
-              type="date"
-              value={validUntil}
-              onChange={(e) => setValidUntil(e.target.value)}
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Line Items Table */}
-      <Card className="shadow-sm overflow-hidden">
-        <CardHeader className="bg-muted/30 border-b py-3 flex flex-row items-center justify-between">
-          <CardTitle className="text-base font-semibold text-ace-navy">Quotation Lines</CardTitle>
-          <Button type="button" variant="outline" size="sm" onClick={addLine} className="h-8 gap-1">
-            <Plus className="h-3.5 w-3.5" /> Add Line
-          </Button>
-        </CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader className="bg-muted/20">
-              <TableRow>
-                <TableHead className="w-[38%]">Product / Description</TableHead>
-                <TableHead className="w-[12%] text-right">Quantity</TableHead>
-                <TableHead className="w-[18%] text-right">Unit Price (MWK)</TableHead>
-                <TableHead className="w-[14%] text-right">Discount (MWK)</TableHead>
-                <TableHead className="w-[14%] text-right">Line Total</TableHead>
-                <TableHead className="w-[4%]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {lines.map((line, idx) => {
-                const prod = prodMap.get(line.productId);
-                const qNum = parseFloat(line.quantity) || 0;
-                const pNum = parseFloat(line.unitPriceMwk) || 0;
-                const dNum = parseFloat(line.discountMwk) || 0;
-                const lineCalc = calculateSalesLine({
-                  quantity: qNum,
-                  unitPriceMinor: Math.round(pNum * 100),
-                  discountMinor: Math.round(dNum * 100),
-                  taxRateBasisPoints: prod?.taxBasisPoints ?? 1750,
-                });
-
-                return (
-                  <TableRow key={idx}>
-                    <TableCell>
-                      <Select
-                        value={line.productId}
-                        onValueChange={(val) => handleProductChange(idx, val)}
-                      >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue placeholder="Select product..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {products.map((p) => (
-                            <SelectItem key={p.id} value={p.id} className="text-xs">
-                              <span className="font-semibold text-ace-navy mr-2">{p.sku}</span>
-                              {p.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        type="number"
-                        step="any"
-                        min="0.001"
-                        value={line.quantity}
-                        onChange={(e) => handleLineChange(idx, 'quantity', e.target.value)}
-                        className="h-8 text-right font-mono text-xs"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={line.unitPriceMwk}
-                        onChange={(e) => handleLineChange(idx, 'unitPriceMwk', e.target.value)}
-                        className="h-8 text-right font-mono text-xs"
-                        placeholder="0.00"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={line.discountMwk}
-                        onChange={(e) => handleLineChange(idx, 'discountMwk', e.target.value)}
-                        className="h-8 text-right font-mono text-xs"
-                        placeholder="0.00"
-                      />
-                    </TableCell>
-                    <TableCell className="text-right font-mono font-medium text-xs">
-                      MWK {(lineCalc.lineTotalMinor / 100).toLocaleString('en-MW', {
+                    })}
+                  </span>
+                </div>
+                {totals.discountMinor > 0 && (
+                  <div className="flex justify-between text-amber-600">
+                    <span>Total Discount:</span>
+                    <span className="font-mono">
+                      - MWK{' '}
+                      {(totals.discountMinor / 100).toLocaleString('en-MW', {
                         minimumFractionDigits: 2,
                       })}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeLine(idx)}
-                        disabled={lines.length === 1}
-                        className="h-7 w-7 p-0 text-muted-foreground hover:text-rose-600"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      {/* Notes & Live Totals Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="space-y-4">
-          <div className="space-y-1">
-            <Label htmlFor="notes">Client Notes</Label>
-            <Input
-              id="notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Price includes delivery to Lilongwe depot"
-            />
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between text-muted-foreground">
+                  <span>VAT (17.5% Standard):</span>
+                  <span className="font-mono">
+                    MWK{' '}
+                    {(totals.taxMinor / 100).toLocaleString('en-MW', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="border-t pt-2 flex justify-between font-bold text-base text-ace-navy">
+                  <span>Grand Total:</span>
+                  <span className="font-mono">
+                    MWK{' '}
+                    {(totals.totalMinor / 100).toLocaleString('en-MW', {
+                      minimumFractionDigits: 2,
+                    })}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
           </div>
-
-          <div className="space-y-1">
-            <Label htmlFor="terms">Terms & Conditions</Label>
-            <Input
-              id="terms"
-              value={terms}
-              onChange={(e) => setTerms(e.target.value)}
-              placeholder="e.g. Valid for 30 days from date of issue"
-            />
-          </div>
-        </div>
-
-        {/* Live Financial Totals Summary */}
-        <Card className="shadow-sm bg-muted/20">
-          <CardHeader className="py-3 border-b">
-            <CardTitle className="text-sm font-semibold text-ace-navy flex items-center gap-1.5">
-              <Calculator className="h-4 w-4" /> Live Financial Calculation
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-4 space-y-2.5 text-sm">
-            <div className="flex justify-between text-muted-foreground">
-              <span>Subtotal:</span>
-              <span className="font-mono">
-                MWK {(totals.subtotalMinor / 100).toLocaleString('en-MW', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-            {totals.discountMinor > 0 && (
-              <div className="flex justify-between text-amber-600">
-                <span>Total Discount:</span>
-                <span className="font-mono">
-                  - MWK {(totals.discountMinor / 100).toLocaleString('en-MW', { minimumFractionDigits: 2 })}
-                </span>
-              </div>
-            )}
-            <div className="flex justify-between text-muted-foreground">
-              <span>VAT (17.5% Standard):</span>
-              <span className="font-mono">
-                MWK {(totals.taxMinor / 100).toLocaleString('en-MW', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-            <div className="border-t pt-2 flex justify-between font-bold text-base text-ace-navy">
-              <span>Grand Total:</span>
-              <span className="font-mono">
-                MWK {(totals.totalMinor / 100).toLocaleString('en-MW', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+        </>
+      )}
+      {canCreateCustomers && (
+        <CustomerDialog
+          open={customerDialogOpen}
+          onOpenChange={setCustomerDialogOpen}
+          initialName={customerSearch.trim()}
+          onCustomerCreated={handleCustomerCreated}
+        />
+      )}
     </form>
   );
 }

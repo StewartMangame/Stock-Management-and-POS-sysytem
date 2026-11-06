@@ -26,14 +26,12 @@ import {
 import {
   ArrowLeft,
   Download,
+  Printer,
   Send,
   CheckCircle2,
   XCircle,
   FileCheck,
-  Building2,
-  Calendar,
   Clock,
-  ShieldCheck,
   AlertTriangle,
 } from 'lucide-react';
 import {
@@ -43,6 +41,7 @@ import {
   convertQuotationToInvoiceAction,
   extendQuotationReservationAction,
 } from '../actions';
+import { QuotationDocumentView } from '@/components/quotations/QuotationDocumentView';
 
 interface QuotationDetailProps {
   quotation: {
@@ -63,6 +62,7 @@ interface QuotationDetailProps {
       id: string;
       name: string;
       accountNumber: string;
+      address?: string | null;
       email: string | null;
       phone: string | null;
       taxNumber: string | null;
@@ -161,10 +161,14 @@ export function QuotationDetailClient({ quotation: q }: QuotationDetailProps) {
     });
   }
 
+  function handlePrint() {
+    window.print();
+  }
+
   return (
     <div className="space-y-6">
-      {/* Top Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      {/* Top Action Header Toolbar (hidden when printing) */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between no-print">
         <div className="flex items-center gap-3">
           <Button asChild variant="outline" size="sm" className="h-8 gap-1">
             <Link href="/sales/quotations">
@@ -199,13 +203,22 @@ export function QuotationDetailClient({ quotation: q }: QuotationDetailProps) {
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Created {new Date(q.createdAt).toLocaleDateString()} by {q.createdByUser?.name || 'System'}
+              Created {new Date(q.createdAt).toLocaleDateString()} by {q.createdByUser?.name || 'System'} | Location: {q.location.name}
             </p>
           </div>
         </div>
 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            onClick={handlePrint}
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 shadow-sm"
+          >
+            <Printer className="h-4 w-4" /> Print
+          </Button>
+
           <Button asChild variant="outline" size="sm" className="h-9 gap-1.5 shadow-sm">
             <a href={`/api/pdf/quotation/${q.id}`} target="_blank" rel="noreferrer">
               <Download className="h-4 w-4" /> Download PDF
@@ -258,161 +271,9 @@ export function QuotationDetailClient({ quotation: q }: QuotationDetailProps) {
         </div>
       </div>
 
-      {/* Meta Grid */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card className="shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase flex items-center gap-1.5">
-              <Building2 className="h-3.5 w-3.5" /> Customer Details
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            <Link
-              href={`/sales/customers/${q.customer.id}`}
-              className="text-base font-bold text-ace-navy hover:underline"
-            >
-              {q.customer.name}
-            </Link>
-            <div className="text-xs font-mono text-muted-foreground">
-              Account: {q.customer.accountNumber}
-            </div>
-            {q.customer.taxNumber && (
-              <div className="text-xs text-muted-foreground">TPIN: {q.customer.taxNumber}</div>
-            )}
-            {q.customer.phone && (
-              <div className="text-xs text-muted-foreground">Tel: {q.customer.phone}</div>
-            )}
-            {q.customer.email && (
-              <div className="text-xs text-muted-foreground">Email: {q.customer.email}</div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase flex items-center gap-1.5">
-              <Calendar className="h-3.5 w-3.5" /> Schedule & Branch
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1.5 text-xs">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Branch Location:</span>
-              <span className="font-semibold">{q.location.name}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Quotation Date:</span>
-              <span className="font-mono">{new Date(q.quotationDate).toLocaleDateString()}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Valid Until:</span>
-              <span className="font-mono font-semibold text-foreground">
-                {new Date(q.validUntil).toLocaleDateString()}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Currency:</span>
-              <span className="font-mono font-semibold">{q.currency}</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-sm bg-muted/20">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase flex items-center gap-1.5">
-              <ShieldCheck className="h-3.5 w-3.5" /> Summary
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1 text-xs">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Subtotal:</span>
-              <span className="font-mono">
-                MWK {(q.subtotalMinor / 100).toLocaleString('en-MW', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-            {q.discountMinor > 0 && (
-              <div className="flex justify-between text-emerald-700">
-                <span>Discount:</span>
-                <span className="font-mono">
-                  - MWK {(q.discountMinor / 100).toLocaleString('en-MW', { minimumFractionDigits: 2 })}
-                </span>
-              </div>
-            )}
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">VAT:</span>
-              <span className="font-mono">
-                MWK {(q.taxMinor / 100).toLocaleString('en-MW', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-            <div className="border-t pt-1.5 flex justify-between text-sm font-bold text-ace-navy">
-              <span>Grand Total:</span>
-              <span className="font-mono">
-                MWK {(q.totalMinor / 100).toLocaleString('en-MW', { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Line Items Table */}
-      <Card className="shadow-sm overflow-hidden">
-        <CardHeader className="bg-muted/30 pb-3">
-          <CardTitle className="text-sm font-bold text-ace-navy">Line Items ({q.lines.length})</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader className="bg-muted/20">
-              <TableRow>
-                <TableHead className="w-10 text-center">#</TableHead>
-                <TableHead>Product / Description</TableHead>
-                <TableHead className="text-right">Quantity</TableHead>
-                <TableHead className="text-right">Unit Price</TableHead>
-                <TableHead className="text-right">Discount</TableHead>
-                <TableHead className="text-right">Tax Rate</TableHead>
-                <TableHead className="text-right">Tax</TableHead>
-                <TableHead className="text-right font-semibold">Total (MWK)</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {q.lines.map((line, idx) => (
-                <TableRow key={line.id}>
-                  <TableCell className="text-center font-mono text-xs text-muted-foreground">
-                    {idx + 1}
-                  </TableCell>
-                  <TableCell>
-                    <div className="font-semibold text-foreground">{line.productName}</div>
-                    <div className="text-xs font-mono text-muted-foreground">SKU: {line.sku}</div>
-                    {line.notes && <div className="text-xs text-muted-foreground mt-0.5">{line.notes}</div>}
-                  </TableCell>
-                  <TableCell className="text-right font-mono font-medium">
-                    {parseFloat(line.quantity).toLocaleString()}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs">
-                    {(line.unitPriceMinor / 100).toLocaleString('en-MW', { minimumFractionDigits: 2 })}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs">
-                    {line.discountMinor > 0
-                      ? (line.discountMinor / 100).toLocaleString('en-MW', { minimumFractionDigits: 2 })
-                      : '—'}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs">
-                    {(line.taxRateBasisPoints / 100).toFixed(1)}%
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs">
-                    {(line.taxMinor / 100).toLocaleString('en-MW', { minimumFractionDigits: 2 })}
-                  </TableCell>
-                  <TableCell className="text-right font-mono font-semibold text-foreground">
-                    {(line.lineTotalMinor / 100).toLocaleString('en-MW', { minimumFractionDigits: 2 })}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
       {/* Active Reservations (if accepted) */}
       {q.reservations.length > 0 && (
-        <Card className="shadow-sm border-emerald-200 bg-emerald-50/20">
+        <Card className="shadow-sm border-emerald-200 bg-emerald-50/20 no-print">
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-bold text-emerald-800 flex items-center gap-2">
               <Clock className="h-4 w-4 text-emerald-600" /> Active Stock Reservations
@@ -429,7 +290,11 @@ export function QuotationDetailClient({ quotation: q }: QuotationDetailProps) {
                       toast.success('Reservation hold extended by 14 days!');
                       router.refresh();
                     } catch (err: unknown) {
-                      toast.error(err instanceof Error ? err.message : 'Failed to extend reservation hold');
+                      toast.error(
+                        err instanceof Error
+                          ? err.message
+                          : 'Failed to extend reservation hold',
+                      );
                     }
                   });
                 }}
@@ -459,7 +324,10 @@ export function QuotationDetailClient({ quotation: q }: QuotationDetailProps) {
                       {parseFloat(res.reservedQty).toLocaleString()}
                     </TableCell>
                     <TableCell className="text-center">
-                      <Badge variant="outline" className="capitalize text-xs bg-emerald-50 text-emerald-700 border-emerald-300">
+                      <Badge
+                        variant="outline"
+                        className="capitalize text-xs bg-emerald-50 text-emerald-700 border-emerald-300"
+                      >
                         {res.status}
                       </Badge>
                     </TableCell>
@@ -474,35 +342,10 @@ export function QuotationDetailClient({ quotation: q }: QuotationDetailProps) {
         </Card>
       )}
 
-      {/* Terms & Notes */}
-      {(q.notes || q.terms) && (
-        <div className="grid gap-4 md:grid-cols-2">
-          {q.notes && (
-            <Card className="shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase">
-                  Quotation Notes
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="text-xs whitespace-pre-wrap text-muted-foreground">
-                {q.notes}
-              </CardContent>
-            </Card>
-          )}
-          {q.terms && (
-            <Card className="shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase">
-                  Terms & Conditions
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="text-xs whitespace-pre-wrap text-muted-foreground">
-                {q.terms}
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
+      {/* Main Quotation Letterhead Document Canvas */}
+      <div className="py-2">
+        <QuotationDocumentView quotation={q} className="shadow-lg" />
+      </div>
 
       {/* Accept Dialog */}
       <Dialog open={acceptDialogOpen} onOpenChange={setAcceptDialogOpen}>
@@ -524,7 +367,9 @@ export function QuotationDetailClient({ quotation: q }: QuotationDetailProps) {
                 className="mt-0.5 rounded border-gray-300 text-ace-navy focus:ring-ace-navy"
               />
               <div>
-                <span className="font-semibold text-foreground">Allow partial reservation on stock shortfall</span>
+                <span className="font-semibold text-foreground">
+                  Allow partial reservation on stock shortfall
+                </span>
                 <p className="mt-0.5">
                   If any product does not have enough unreserved stock, reserve what is available and proceed
                   without throwing a stock shortfall error.
