@@ -2,12 +2,15 @@
 
 /**
  * IntegrationsClient — tabbed admin UI for integrations management.
+ * EIS Queue tab: pending, failed, rejected items with reasons, resend,
+ * correct-and-resend, and an alert for items pending > 24 hours.
  */
-import { useState, useRef } from 'react';
+import { useState, useRef, useTransition } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { CheckCircle, XCircle, Clock, AlertTriangle, Upload, RefreshCw } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, AlertTriangle, Upload, RefreshCw, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { resendEisSubmissionAction, correctAndResendEisSubmissionAction } from './eis-actions';
 
 // ── Types (mirror server row shapes we pass in) ──────────────────────────────
 
@@ -111,6 +114,56 @@ export function IntegrationsClient({ envStatus, webhookRows, eisRows, importRows
   const [uploading, setUploading] = useState(false);
   const [profileId, setProfileId] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const [isPending, startTransition] = useTransition();
+
+  // EIS correct-and-resend modal state
+  const [correctingRow, setCorrectingRow] = useState<EisRow | null>(null);
+  const [correctedPayload, setCorrectedPayload] = useState('');
+
+  // Items pending > 24 hours
+  const now = Date.now();
+  const stalePendingRows = eisRows.filter(
+    (r) =>
+      (r.status === 'pending' || r.status === 'processing') &&
+      now - new Date(r.createdAt).getTime() > 24 * 60 * 60 * 1000,
+  );
+
+  function handleResend(id: string) {
+    startTransition(async () => {
+      try {
+        await resendEisSubmissionAction(id);
+        toast.success('EIS submission re-queued for retry.');
+      } catch (e: any) {
+        toast.error(e.message);
+      }
+    });
+  }
+
+  function openCorrect(row: EisRow) {
+    setCorrectingRow(row);
+    // Try to show current payload if available; fall back to empty object template
+    setCorrectedPayload('{\n  \n}');
+  }
+
+  function handleCorrectAndResend() {
+    if (!correctingRow) return;
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(correctedPayload);
+    } catch {
+      toast.error('Invalid JSON payload. Please correct before submitting.');
+      return;
+    }
+    startTransition(async () => {
+      try {
+        await correctAndResendEisSubmissionAction(correctingRow.id, parsed);
+        toast.success('EIS submission corrected and re-queued.');
+        setCorrectingRow(null);
+      } catch (e: any) {
+        toast.error(e.message);
+      }
+    });
+  }
 
   const providerReady =
     envStatus.ONEKHUSA_BASE_URL &&
@@ -335,9 +388,24 @@ export function IntegrationsClient({ envStatus, webhookRows, eisRows, importRows
       {/* ── EIS Queue ── */}
       {tab === 'eis' && (
         <div className="space-y-4">
-          {/* Summary */}
+          {/* Stale pending alert */}
+          {stalePendingRows.length > 0 && (
+            <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
+              <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold">
+                  {stalePendingRows.length} EIS submission{stalePendingRows.length > 1 ? 's' : ''} pending &gt; 24 hours
+                </p>
+                <p className="mt-1 text-xs">
+                  These items may require manual intervention. Use &ldquo;Resend&rdquo; or &ldquo;Correct &amp; Resend&rdquo; to retry.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Summary cards */}
           <div className="grid grid-cols-4 gap-4">
-            {['pending', 'processing', 'accepted', 'failed'].map((s) => {
+            {(['pending', 'processing', 'accepted', 'failed'] as const).map((s) => {
               const c = eisCounts.find((e) => e.status === s);
               return (
                 <div key={s} className="border rounded-lg p-4 text-center">
@@ -348,6 +416,7 @@ export function IntegrationsClient({ envStatus, webhookRows, eisRows, importRows
             })}
           </div>
 
+          {/* EIS submissions table */}
           <div className="border rounded-lg overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
@@ -358,35 +427,109 @@ export function IntegrationsClient({ envStatus, webhookRows, eisRows, importRows
                   <th className="px-4 py-2 text-left font-medium">Status</th>
                   <th className="px-4 py-2 text-right font-medium">Attempts</th>
                   <th className="px-4 py-2 text-left font-medium">Next Retry</th>
-                  <th className="px-4 py-2 text-left font-medium">Error</th>
+                  <th className="px-4 py-2 text-left font-medium">Error / Reason</th>
+                  <th className="px-4 py-2 text-right font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {eisRows.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">
+                    <td colSpan={8} className="px-4 py-6 text-center text-muted-foreground">
                       No EIS submissions yet.
                     </td>
                   </tr>
                 )}
-                {eisRows.map((row) => (
-                  <tr key={row.id} className="hover:bg-muted/20">
-                    <td className="px-4 py-2 whitespace-nowrap">{fmt(row.createdAt)}</td>
-                    <td className="px-4 py-2 font-mono text-xs">{row.documentId.slice(0, 8)}…</td>
-                    <td className="px-4 py-2 capitalize">{row.documentType.replace('_', ' ')}</td>
-                    <td className="px-4 py-2"><StatusBadge status={row.status} /></td>
-                    <td className="px-4 py-2 text-right">{row.attempts}</td>
-                    <td className="px-4 py-2 whitespace-nowrap text-xs">
-                      {row.status === 'accepted' ? '—' : fmt(row.nextRetryAt)}
-                    </td>
-                    <td className="px-4 py-2 text-xs text-destructive max-w-xs truncate">
-                      {row.errorMessage ?? ''}
-                    </td>
-                  </tr>
-                ))}
+                {eisRows.map((row) => {
+                  const isStale =
+                    (row.status === 'pending' || row.status === 'processing') &&
+                    now - new Date(row.createdAt).getTime() > 24 * 60 * 60 * 1000;
+                  const canResend = row.status !== 'accepted';
+                  return (
+                    <tr key={row.id} className={isStale ? 'bg-amber-50/60 dark:bg-amber-900/10' : 'hover:bg-muted/20'}>
+                      <td className="px-4 py-2 whitespace-nowrap text-xs">{fmt(row.createdAt)}</td>
+                      <td className="px-4 py-2 font-mono text-xs">{row.documentId.slice(0, 8)}…</td>
+                      <td className="px-4 py-2 capitalize text-xs">{row.documentType.replace('_', ' ')}</td>
+                      <td className="px-4 py-2">
+                        <StatusBadge status={row.status} />
+                        {isStale && (
+                          <span className="ml-1 inline-flex items-center text-xs text-amber-600 font-medium">
+                            <Clock className="h-3 w-3 mr-0.5" /> &gt;24h
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-right text-xs">{row.attempts}</td>
+                      <td className="px-4 py-2 whitespace-nowrap text-xs">
+                        {row.status === 'accepted' ? '—' : fmt(row.nextRetryAt)}
+                      </td>
+                      <td className="px-4 py-2 text-xs text-destructive max-w-xs truncate">
+                        {row.errorMessage ?? ''}
+                      </td>
+                      <td className="px-4 py-2 text-right space-x-1">
+                        {canResend && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs"
+                              disabled={isPending}
+                              onClick={() => handleResend(row.id)}
+                            >
+                              <RefreshCw className="h-3 w-3 mr-1" />
+                              Resend
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 text-xs"
+                              disabled={isPending}
+                              onClick={() => openCorrect(row)}
+                            >
+                              Correct &amp; Resend
+                            </Button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
+
+          {/* Correct-and-resend modal */}
+          {correctingRow && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+              <div className="w-full max-w-lg rounded-lg border bg-white dark:bg-zinc-900 shadow-xl p-6 space-y-4">
+                <h2 className="text-base font-semibold">Correct &amp; Resend EIS Submission</h2>
+                <p className="text-xs text-muted-foreground">
+                  Document: <span className="font-mono">{correctingRow.documentId.slice(0, 8)}…</span>{' '}
+                  ({correctingRow.documentType}) · Status: <StatusBadge status={correctingRow.status} />
+                </p>
+                {correctingRow.errorMessage && (
+                  <div className="rounded bg-destructive/10 border border-destructive/30 p-2 text-xs text-destructive">
+                    <strong>Error:</strong> {correctingRow.errorMessage}
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium mb-1">Corrected JSON Payload</label>
+                  <textarea
+                    className="w-full h-48 rounded border border-input bg-background p-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+                    value={correctedPayload}
+                    onChange={(e) => setCorrectedPayload(e.target.value)}
+                    spellCheck={false}
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setCorrectingRow(null)} disabled={isPending}>
+                    Cancel
+                  </Button>
+                  <Button size="sm" onClick={handleCorrectAndResend} disabled={isPending}>
+                    Correct &amp; Resend
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

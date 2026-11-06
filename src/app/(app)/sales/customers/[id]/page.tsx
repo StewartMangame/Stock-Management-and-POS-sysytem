@@ -15,6 +15,7 @@ import {
 import { eq, desc } from 'drizzle-orm';
 import { getCustomerById, getCustomerCreditStatus } from '@/server/services/sales/customers';
 import { getCustomerCredit } from '@/server/services/sales/payments';
+import { EntityHistoryTab } from '@/components/shared/EntityHistoryTab';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -568,6 +569,9 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
           </Table>
         </CardContent>
       </Card>
+
+      {/* Historical Audit Log Timeline */}
+      <EntityHistoryTab entityType="customer" entityId={customer.id} />
     </div>
   );
 }

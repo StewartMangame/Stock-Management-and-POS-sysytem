@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -24,9 +24,16 @@ import {
   CheckCircle2,
   Loader2,
   AlertCircle,
+  XCircle,
+  Radio,
 } from 'lucide-react';
 import { formatMwk, parseKwachaToMinor } from '@/lib/money';
 import { toast } from 'sonner';
+import {
+  initiatePosMobileMoneyAction,
+  checkPosMobileMoneyStatusAction,
+  cancelPosMobileMoneyAction,
+} from '@/app/(app)/pos/actions';
 
 export interface PaymentLeg {
   id: string;
@@ -34,6 +41,7 @@ export interface PaymentLeg {
   appliedMinor: number;
   tenderedMinor?: number;
   details?: Record<string, unknown>;
+  existingPaymentId?: string;
 }
 
 interface PaymentModalProps {
@@ -41,6 +49,9 @@ interface PaymentModalProps {
   onClose: () => void;
   totalMinor: number;
   onCompleteSale: (payments: PaymentLeg[], changeMinor: number) => Promise<void>;
+  shiftId?: string;
+  locationId?: string;
+  customerId?: string;
 }
 
 export function PaymentModal({
@@ -48,6 +59,9 @@ export function PaymentModal({
   onClose,
   totalMinor,
   onCompleteSale,
+  shiftId,
+  locationId,
+  customerId,
 }: PaymentModalProps) {
   const [payments, setPayments] = useState<PaymentLeg[]>([]);
   const [currentMethod, setCurrentMethod] = useState<'cash' | 'card' | 'airtel_money' | 'mpamba'>('cash');
@@ -63,13 +77,37 @@ export function PaymentModal({
   // Mobile money details
   const [mobilePhone, setMobilePhone] = useState('');
   const [mobileTxId, setMobileTxId] = useState('');
+  const [manualEntryMode, setManualEntryMode] = useState(false);
+
+  // Live Mobile Money Prompt State
+  const [promptLoading, setPromptLoading] = useState(false);
+  const [activePaymentId, setActivePaymentId] = useState<string | null>(null);
+  const [promptStatus, setPromptStatus] = useState<'idle' | 'pushing' | 'waiting_pin' | 'approved' | 'failed'>('idle');
+  const [promptMessage, setPromptMessage] = useState<string | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Cleanup interval on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    };
+  }, []);
+
   // Initialize with single full cash payment when modal opens
   useEffect(() => {
     if (isOpen) {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      setPromptLoading(false);
+      setActivePaymentId(null);
+      setPromptStatus('idle');
+      setPromptMessage(null);
+      setManualEntryMode(false);
       setPayments([]);
       setCurrentMethod('cash');
       const fullKwacha = (totalMinor / 100).toFixed(2);
@@ -172,6 +210,134 @@ export function PaymentModal({
     setCardApprovalCode('');
     setMobileTxId('');
     setMobilePhone('');
+  };
+
+  // Initiate live mobile money push prompt
+  const handleInitiatePushPrompt = async () => {
+    if (!mobilePhone.trim()) {
+      setError('Please enter customer phone number (e.g. 0991234567 or 0881234567).');
+      return;
+    }
+    if (!shiftId || !locationId) {
+      setError('Active shift or register location not found.');
+      return;
+    }
+    let appliedMinor: number;
+    try {
+      appliedMinor = parseKwachaToMinor(currentAmountStr);
+      if (appliedMinor <= 0) throw new Error();
+    } catch {
+      setError('Please enter a valid amount.');
+      return;
+    }
+
+    if (appliedMinor > remainingMinor) {
+      setError(`Amount cannot exceed remaining balance of ${formatMwk(remainingMinor)}.`);
+      return;
+    }
+
+    setPromptLoading(true);
+    setPromptStatus('pushing');
+    setPromptMessage('Dispatching payment prompt to customer handset...');
+    setError(null);
+
+    try {
+      const res = await initiatePosMobileMoneyAction({
+        shiftId,
+        locationId,
+        customerId,
+        method: currentMethod === 'airtel_money' ? 'airtel_money' : 'mpamba',
+        phone: mobilePhone.trim(),
+        amountMinor: appliedMinor,
+      });
+
+      if (res.status === 'failed') {
+        setPromptStatus('failed');
+        setError(res.errorMessage || 'Payment initiation failed.');
+        setPromptLoading(false);
+        return;
+      }
+
+      const pId = res.paymentId;
+      setActivePaymentId(pId);
+      setPromptStatus('waiting_pin');
+      setPromptMessage('Prompt sent! Customer must enter PIN on their handset...');
+
+      // Start polling status
+      pollIntervalRef.current = setInterval(async () => {
+        try {
+          const statusRes = await checkPosMobileMoneyStatusAction(pId);
+          if (statusRes.status === 'awaiting_sale') {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
+            setPromptStatus('approved');
+            setPromptMessage('Payment approved by customer!');
+            toast.success(`Mobile money payment of ${formatMwk(appliedMinor)} approved!`);
+
+            const newLeg: PaymentLeg = {
+              id: Math.random().toString(),
+              method: currentMethod,
+              appliedMinor,
+              details: {
+                provider: currentMethod,
+                phone: mobilePhone.trim(),
+                paymentId: pId,
+              },
+              existingPaymentId: pId,
+            };
+
+            setPayments((prev) => {
+              const updated = [...prev, newLeg];
+              const newRemaining = totalMinor - updated.reduce((s, p) => s + p.appliedMinor, 0);
+              const nextAmount = (newRemaining / 100).toFixed(2);
+              setCurrentAmountStr(nextAmount);
+              setCashTenderedStr(nextAmount);
+              return updated;
+            });
+
+            setPromptLoading(false);
+            setActivePaymentId(null);
+            setMobilePhone('');
+            setMobileTxId('');
+          } else if (statusRes.status === 'failed') {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
+            setPromptStatus('failed');
+            setError('Payment was declined or timed out on customer handset.');
+            setPromptLoading(false);
+          }
+        } catch {
+          // ignore transient polling error
+        }
+      }, 2500);
+    } catch (err: unknown) {
+      setPromptStatus('failed');
+      setPromptLoading(false);
+      setError(err instanceof Error ? err.message : 'Failed to send push prompt');
+    }
+  };
+
+  const handleCancelPrompt = async () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    if (activePaymentId) {
+      try {
+        await cancelPosMobileMoneyAction({
+          paymentId: activePaymentId,
+          reason: 'Cashier cancelled prompt in POS',
+        });
+      } catch {}
+    }
+    setPromptLoading(false);
+    setActivePaymentId(null);
+    setPromptStatus('idle');
+    setPromptMessage(null);
   };
 
   const handleRemovePaymentLeg = (id: string) => {
@@ -482,42 +648,131 @@ export function PaymentModal({
 
               {/* Mobile Money Inputs */}
               {(currentMethod === 'airtel_money' || currentMethod === 'mpamba') && (
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <div className="space-y-1">
-                    <Label htmlFor="mobile-txid" className="text-xs">
-                      Transaction ID / Reference
-                    </Label>
-                    <Input
-                      id="mobile-txid"
-                      placeholder="e.g. CI241029.1234.H00123"
-                      value={mobileTxId}
-                      onChange={(e) => setMobileTxId(e.target.value)}
-                      className="h-9 text-xs uppercase font-mono"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="mobile-phone" className="text-xs">
-                      Customer Phone Number
-                    </Label>
-                    <Input
-                      id="mobile-phone"
-                      placeholder="e.g. 0991234567"
-                      value={mobilePhone}
-                      onChange={(e) => setMobilePhone(e.target.value)}
-                      className="h-9 text-xs"
-                    />
-                  </div>
+                <div className="space-y-2 pt-1">
+                  {promptLoading ? (
+                    <div className="rounded-lg border-2 border-dashed border-ace-cyan/50 bg-ace-cyan/5 p-4 text-center space-y-3">
+                      <div className="flex items-center justify-center gap-2">
+                        <Loader2 className="h-5 w-5 animate-spin text-ace-navy" />
+                        <span className="text-xs font-bold text-ace-navy">
+                          {promptStatus === 'pushing' ? 'Connecting to Gateway...' : 'Customer Prompt Dispatched'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{promptMessage}</p>
+                      <div className="flex justify-center gap-2 pt-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={handleCancelPrompt}
+                          className="h-8 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                        >
+                          <XCircle className="h-3.5 w-3.5 mr-1" />
+                          Cancel Prompt
+                        </Button>
+                      </div>
+                    </div>
+                  ) : !manualEntryMode ? (
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="mobile-phone" className="text-xs font-semibold">
+                            Customer Phone Number
+                          </Label>
+                          <span className="text-[10px] text-muted-foreground">
+                            {currentMethod === 'airtel_money' ? 'Airtel Money (088...)' : 'TNM Mpamba (099...)'}
+                          </span>
+                        </div>
+                        <Input
+                          id="mobile-phone"
+                          placeholder="e.g. 0881234567 or 0991234567"
+                          value={mobilePhone}
+                          onChange={(e) => setMobilePhone(e.target.value)}
+                          className="h-9 text-xs"
+                        />
+                      </div>
+
+                      <Button
+                        type="button"
+                        onClick={handleInitiatePushPrompt}
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold h-9 shadow-sm"
+                      >
+                        <Radio className="mr-1.5 h-3.5 w-3.5" />
+                        Send Push Prompt to Handset
+                      </Button>
+
+                      <div className="flex justify-center pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setManualEntryMode(true)}
+                          className="text-[11px] text-muted-foreground hover:text-ace-navy underline cursor-pointer"
+                        >
+                          Manual Transaction Reference (Offline / USSD Transfer)
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label htmlFor="mobile-txid" className="text-xs">
+                            Transaction ID / Reference
+                          </Label>
+                          <Input
+                            id="mobile-txid"
+                            placeholder="e.g. CI241029.1234.H00123"
+                            value={mobileTxId}
+                            onChange={(e) => setMobileTxId(e.target.value)}
+                            className="h-9 text-xs uppercase font-mono"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="mobile-phone" className="text-xs">
+                            Customer Phone Number
+                          </Label>
+                          <Input
+                            id="mobile-phone"
+                            placeholder="e.g. 0991234567"
+                            value={mobilePhone}
+                            onChange={(e) => setMobilePhone(e.target.value)}
+                            className="h-9 text-xs"
+                          />
+                        </div>
+                      </div>
+
+                      <Button
+                        type="button"
+                        onClick={handleAddPaymentLeg}
+                        className="w-full bg-ace-blue hover:bg-ace-navy text-white text-xs font-semibold h-9"
+                      >
+                        <Plus className="mr-1.5 h-3.5 w-3.5" />
+                        Add Payment Leg
+                      </Button>
+
+                      <div className="flex justify-center pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setManualEntryMode(false)}
+                          className="text-[11px] text-muted-foreground hover:text-ace-navy underline cursor-pointer"
+                        >
+                          ← Back to Automated Push Prompt
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
-              <Button
-                type="button"
-                onClick={handleAddPaymentLeg}
-                className="w-full bg-ace-blue hover:bg-ace-navy text-white text-xs font-semibold h-9"
-              >
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                Add Payment Leg
-              </Button>
+              {/* Add Payment Leg button for cash and card */}
+              {(currentMethod === 'cash' || currentMethod === 'card') && (
+                <Button
+                  type="button"
+                  onClick={handleAddPaymentLeg}
+                  className="w-full bg-ace-blue hover:bg-ace-navy text-white text-xs font-semibold h-9"
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  Add Payment Leg
+                </Button>
+              )}
             </div>
           )}
 

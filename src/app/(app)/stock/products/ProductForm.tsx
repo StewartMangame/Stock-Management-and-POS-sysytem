@@ -14,7 +14,7 @@ import { Trash2, Plus } from 'lucide-react';
 
 interface Category { id: string; name: string }
 interface UOM { id: string; name: string; symbol: string; allowDecimal: boolean }
-interface TaxRate { id: string; name: string; rateBasisPoints: number }
+interface TaxRate { id: string; name: string; rateBasisPoints: number; isDefault?: boolean | null }
 interface ProductBasic { id: string; name: string; sku: string; productType: string | null }
 
 interface ProductData {
@@ -43,9 +43,10 @@ interface Props {
   taxRates: TaxRate[];
   allProducts: ProductBasic[];
   isEditing: boolean;
+  defaultTaxRateId?: string;
 }
 
-export function ProductForm({ product, categories, uoms, taxRates, allProducts, isEditing }: Props) {
+export function ProductForm({ product, categories, uoms, taxRates, allProducts, isEditing, defaultTaxRateId }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -61,7 +62,8 @@ export function ProductForm({ product, categories, uoms, taxRates, allProducts, 
   const [sellingPriceInput, setSellingPriceInput] = useState(
     product ? (product.sellingPriceMinor / 100).toFixed(2) : '',
   );
-  const [taxRateId, setTaxRateId] = useState(product?.taxRateId ?? '');
+  const defaultRate = taxRates.find((t) => t.isDefault)?.id ?? defaultTaxRateId ?? '';
+  const [taxRateId, setTaxRateId] = useState(product?.taxRateId ?? defaultRate);
   const [minStock, setMinStock] = useState(product?.minStockAlert ?? '');
   const [maxStock, setMaxStock] = useState(product?.maxStock ?? '');
   const [serialTracking, setSerialTracking] = useState(product?.serialTracking ?? false);

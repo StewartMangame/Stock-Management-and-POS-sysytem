@@ -73,6 +73,7 @@ import {
 } from '@/server/services/integrations/bank-reconciliation';
 import { createDirectInvoice, issueInvoice } from '@/server/services/sales/invoices';
 import { todayInCompanyTz, getNow } from '@/lib/timezone';
+import { executeStockMovements } from '@/server/services/stock/stock-engine';
 
 let testLocId: string;
 let testCustId: string;
@@ -137,16 +138,16 @@ beforeAll(async () => {
     });
   }
 
-  // 4. Tax Rate
+  // 4. Tax Rate - Query default active tax rate
   const [tax] = await db
-    .insert(taxRates)
-    .values({
-      name: `P5 Standard 16.5% ${TS}`,
-      rateBasisPoints: 1650,
-      isDefault: false,
-    })
-    .returning();
-  testTaxRateId = tax!.id;
+    .select()
+    .from(taxRates)
+    .where(and(eq(taxRates.isDefault, true), eq(taxRates.isActive, true)))
+    .limit(1);
+  if (!tax) {
+    throw new Error('Default active tax rate not found. Run seed first.');
+  }
+  testTaxRateId = tax.id;
 
   // 5. Category & UoM & Product
   const [cat] = await db
@@ -172,13 +173,17 @@ beforeAll(async () => {
     .returning();
   testProductId = prod!.id;
 
-  // Seed stock balance
-  await db.insert(stockBalances).values({
-    productId: testProductId,
-    locationId: testLocId,
-    onHand: '500.000',
-    reserved: '0.000',
-  });
+  // Seed stock balance via ledger movement
+  await executeStockMovements(db, [
+    {
+      productId: testProductId,
+      locationId: testLocId,
+      quantity: 500,
+      unitCostMinor: 50000,
+      movementType: 'purchase_receipt',
+      referenceType: 'goods_receipt',
+    },
+  ]);
 
   // Open a POS shift
   const shift = await openShift({
@@ -272,7 +277,7 @@ describe('Phase 5 — Integrations Integration Tests', () => {
       customerId: testCustId,
       method: 'airtel_money',
       phone: '+265881234567',
-      amountMinor: 116500, // 1000 + 16.5% tax
+      amountMinor: 117500, // 1000 + 17.5% tax
     });
 
     expect(pushResult.status).toBe('pending');
@@ -307,7 +312,7 @@ describe('Phase 5 — Integrations Integration Tests', () => {
         payments: [
           {
             method: 'airtel_money',
-            appliedMinor: 116500,
+            appliedMinor: 117500,
             existingPaymentId: pushResult.paymentId,
           },
         ],

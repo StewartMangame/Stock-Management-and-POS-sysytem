@@ -19,6 +19,7 @@ import {
 } from '@/lib/stock-math';
 import { executeStockMovements } from '@/server/services/stock/stock-engine';
 import { writeAuditLog } from '@/server/services/audit';
+import { getSetting } from '@/server/services/settings';
 import Decimal from 'decimal.js';
 
 export interface LandedCostInput {
@@ -49,6 +50,10 @@ export interface GoodsReceiptInput {
   landedCosts?: LandedCostInput[];
   /** Flag to confirm over-receipt if items exceed remaining PO ordered quantity */
   allowOverReceipt?: boolean;
+  /** If true, a manager has confirmed the cost variance warning and it was audited. */
+  costVarianceConfirmed?: boolean;
+  /** Threshold (percent) above which a variance requires confirmation. Defaults to 300. */
+  costVarianceThresholdPercent?: number;
 }
 
 export async function listGoodsReceipts(filters?: {
@@ -154,6 +159,71 @@ export async function createGoodsReceipt(input: GoodsReceiptInput, actorId?: str
   if (exchangeRate.lte(0)) throw new Error('Exchange rate must be positive.');
 
   const currency = (input.currency || 'MWK').toUpperCase();
+
+  // ── Pre-flight Cost Variance & Price Guards ────────────────────────────────
+  const thresholdSetting = (await getSetting('cost_variance_threshold_percent')) as number | undefined;
+  const thresholdPercent = input.costVarianceThresholdPercent ?? (typeof thresholdSetting === 'number' ? thresholdSetting : 300);
+  const VARIANCE_THRESHOLD = new Decimal(thresholdPercent).dividedBy(100);
+
+  const aboveSellingSetting = (await getSetting('cost_above_selling_price_threshold_percent')) as number | undefined;
+  const aboveSellingPercent = typeof aboveSellingSetting === 'number' ? aboveSellingSetting : 100;
+  const ABOVE_SELLING_THRESHOLD = new Decimal(aboveSellingPercent).dividedBy(100);
+
+  for (const it of input.items) {
+    const [currentProduct] = await db
+      .select({
+        avgCostMinor: products.avgCostMinor,
+        lastCostMinor: products.lastCostMinor,
+        sellingPriceMinor: products.sellingPriceMinor,
+        name: products.name,
+      })
+      .from(products)
+      .where(eq(products.id, it.productId));
+
+    if (!currentProduct) continue;
+
+    const unitCostSup = new Decimal(it.unitCostSupplier);
+    const unitCostMwk = convertSupplierToMwkMinor(unitCostSup, exchangeRate);
+    const incomingDecimal = new Decimal(unitCostMwk);
+
+    const currentAvg = new Decimal(currentProduct.avgCostMinor ?? 0);
+    const lastCost = new Decimal(currentProduct.lastCostMinor ?? 0);
+    const baseline = currentAvg.gt(0) ? currentAvg : (lastCost.gt(0) ? lastCost : null);
+
+    // Variance check against current average (or last cost on first receipt)
+    if (baseline && baseline.gt(0)) {
+      const variance = incomingDecimal.minus(baseline).abs().dividedBy(baseline);
+
+      if (variance.gt(VARIANCE_THRESHOLD) && !input.costVarianceConfirmed) {
+        const err = new Error(
+          `Cost variance warning for "${currentProduct.name}": incoming unit cost ${unitCostMwk} tambala differs from ${currentAvg.gt(0) ? 'current average' : 'last cost'} ${baseline.toNumber()} tambala by ${variance.times(100).toFixed(1)}% (threshold: ${thresholdPercent}%). Manager confirmation required.`,
+        );
+        (err as any).isCostVarianceWarning = true;
+        (err as any).productName = currentProduct.name;
+        (err as any).currentAvgCostMinor = baseline.toNumber();
+        (err as any).incomingUnitCostMinor = unitCostMwk;
+        (err as any).variancePercent = variance.times(100).toFixed(1);
+        throw err;
+      }
+    }
+
+    // Cost above selling price check
+    const sellingPrice = new Decimal(currentProduct.sellingPriceMinor ?? 0);
+    if (sellingPrice.gt(0) && incomingDecimal.gt(sellingPrice)) {
+      const excess = incomingDecimal.minus(sellingPrice).dividedBy(sellingPrice);
+      if (excess.gt(ABOVE_SELLING_THRESHOLD) && !input.costVarianceConfirmed) {
+        const err = new Error(
+          `Cost above selling price warning for "${currentProduct.name}": incoming unit cost ${unitCostMwk} tambala exceeds selling price ${sellingPrice.toNumber()} tambala by ${excess.times(100).toFixed(1)}% (threshold: ${aboveSellingPercent}%). Manager confirmation required.`,
+        );
+        (err as any).isCostVarianceWarning = true;
+        (err as any).productName = currentProduct.name;
+        (err as any).sellingPriceMinor = sellingPrice.toNumber();
+        (err as any).incomingUnitCostMinor = unitCostMwk;
+        (err as any).variancePercent = excess.times(100).toFixed(1);
+        throw err;
+      }
+    }
+  }
 
   const [receipt] = await db.transaction(async (tx) => {
     const grnNumber = await getNextDocNumber(tx, 'goods_receipt', input.locationId);
@@ -338,6 +408,19 @@ export async function createGoodsReceipt(input: GoodsReceiptInput, actorId?: str
     entityId: receipt!.id,
     after: receipt,
   });
+
+  if (input.costVarianceConfirmed) {
+    await writeAuditLog(db, {
+      userId: actorId,
+      action: 'stock.cost_variance_approved',
+      entityType: 'goods_receipt',
+      entityId: receipt!.id,
+      after: {
+        message: 'Manager confirmed cost variance on goods receipt',
+        grnNumber: receipt!.grnNumber,
+      },
+    });
+  }
 
   return receipt!;
 }

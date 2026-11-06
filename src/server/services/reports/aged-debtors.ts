@@ -76,13 +76,15 @@ export interface AgedDebtorsReport {
 }
 
 export async function getAgedDebtors(
-  asOfInput: Date | string,
+  asOfInput?: Date | string | null,
   locationId?: string,
 ): Promise<AgedDebtorsReport> {
   const asOfDateStr =
-    typeof asOfInput === 'string'
-      ? asOfInput.split('T')[0]!
-      : todayInCompanyTz(asOfInput);
+    asOfInput && typeof asOfInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(asOfInput.trim())
+      ? asOfInput.trim().split('T')[0]!
+      : asOfInput instanceof Date && !isNaN(asOfInput.getTime())
+      ? todayInCompanyTz(asOfInput)
+      : todayInCompanyTz();
   const asOfDate = new Date(`${asOfDateStr}T00:00:00+02:00`);
   const asOfEndOfDay = endOfDayInCompanyTz(asOfDateStr);
 
@@ -165,80 +167,100 @@ export async function getAgedDebtors(
   }
 
   // Calculate customer credit for each customer as-of (excluding awaiting_sale)
+  // Batch all customer lookups in 4 aggregated queries rather than N*4 sequential roundtrips
+  const customerIds = Array.from(customerMap.keys());
   const customerCreditMap = new Map<string, number>();
-  for (const customerId of customerMap.keys()) {
-    // Confirmed receipts on or before asOfEndOfDay
-    const [receiptsRes] = await db
-      .select({
-        total: sql<string>`COALESCE(SUM(${payments.amountMinor}), 0)`,
-      })
-      .from(payments)
-      .where(
-        and(
-          eq(payments.customerId, customerId),
-          eq(payments.kind, 'receipt'),
-          ne(payments.status, 'awaiting_sale'),
-          isNotNull(payments.confirmedAt),
-          lte(payments.confirmedAt, asOfEndOfDay),
-        ),
-      );
 
-    // Reversals on or before asOfEndOfDay
-    const [reversalsRes] = await db
-      .select({
-        total: sql<string>`COALESCE(SUM(${payments.amountMinor}), 0)`,
-      })
-      .from(payments)
-      .where(
-        and(
-          eq(payments.customerId, customerId),
-          isNotNull(payments.reversedAt),
-          lte(payments.reversedAt, asOfEndOfDay),
-        ),
-      );
+  if (customerIds.length > 0) {
+    const [receiptsRows, reversalsRows, refundsRows, allocsRows] = await Promise.all([
+      // Confirmed receipts per customer
+      db
+        .select({
+          customerId: payments.customerId,
+          total: sql<string>`COALESCE(SUM(${payments.amountMinor}), 0)`,
+        })
+        .from(payments)
+        .where(
+          and(
+            inArray(payments.customerId, customerIds),
+            eq(payments.kind, 'receipt'),
+            ne(payments.status, 'awaiting_sale'),
+            isNotNull(payments.confirmedAt),
+            lte(payments.confirmedAt, asOfEndOfDay),
+          ),
+        )
+        .groupBy(payments.customerId),
 
-    // Confirmed refunds on or before asOfEndOfDay
-    const [refundsRes] = await db
-      .select({
-        total: sql<string>`COALESCE(SUM(${payments.amountMinor}), 0)`,
-      })
-      .from(payments)
-      .where(
-        and(
-          eq(payments.customerId, customerId),
-          eq(payments.kind, 'refund'),
-          ne(payments.status, 'awaiting_sale'),
-          isNotNull(payments.confirmedAt),
-          lte(payments.confirmedAt, asOfEndOfDay),
-        ),
-      );
+      // Reversals per customer
+      db
+        .select({
+          customerId: payments.customerId,
+          total: sql<string>`COALESCE(SUM(${payments.amountMinor}), 0)`,
+        })
+        .from(payments)
+        .where(
+          and(
+            inArray(payments.customerId, customerIds),
+            isNotNull(payments.reversedAt),
+            lte(payments.reversedAt, asOfEndOfDay),
+          ),
+        )
+        .groupBy(payments.customerId),
 
-    // Allocations on or before asOfEndOfDay for this customer's confirmed receipts
-    const [allocsRes] = await db
-      .select({
-        total: sql<string>`COALESCE(SUM(${paymentAllocations.amountMinor}), 0)`,
-      })
-      .from(paymentAllocations)
-      .innerJoin(payments, eq(paymentAllocations.paymentId, payments.id))
-      .where(
-        and(
-          eq(payments.customerId, customerId),
-          eq(payments.kind, 'receipt'),
-          ne(payments.status, 'awaiting_sale'),
-          isNotNull(payments.confirmedAt),
-          lte(paymentAllocations.allocatedAt, asOfEndOfDay),
-        ),
-      );
+      // Confirmed refunds per customer
+      db
+        .select({
+          customerId: payments.customerId,
+          total: sql<string>`COALESCE(SUM(${payments.amountMinor}), 0)`,
+        })
+        .from(payments)
+        .where(
+          and(
+            inArray(payments.customerId, customerIds),
+            eq(payments.kind, 'refund'),
+            ne(payments.status, 'awaiting_sale'),
+            isNotNull(payments.confirmedAt),
+            lte(payments.confirmedAt, asOfEndOfDay),
+          ),
+        )
+        .groupBy(payments.customerId),
 
-    const rawReceipts = BigInt(receiptsRes?.total ?? '0');
-    const rawReversals = BigInt(reversalsRes?.total ?? '0');
-    const receipts = rawReceipts > rawReversals ? rawReceipts - rawReversals : BigInt(0);
+      // Allocations on or before asOfEndOfDay for customer's confirmed receipts
+      db
+        .select({
+          customerId: payments.customerId,
+          total: sql<string>`COALESCE(SUM(${paymentAllocations.amountMinor}), 0)`,
+        })
+        .from(paymentAllocations)
+        .innerJoin(payments, eq(paymentAllocations.paymentId, payments.id))
+        .where(
+          and(
+            inArray(payments.customerId, customerIds),
+            eq(payments.kind, 'receipt'),
+            ne(payments.status, 'awaiting_sale'),
+            isNotNull(payments.confirmedAt),
+            lte(paymentAllocations.allocatedAt, asOfEndOfDay),
+          ),
+        )
+        .groupBy(payments.customerId),
+    ]);
 
-    const refunds = BigInt(refundsRes?.total ?? '0');
-    const allocs = BigInt(allocsRes?.total ?? '0');
+    const receiptsMap = new Map(receiptsRows.map((r) => [r.customerId, BigInt(r.total)]));
+    const reversalsMap = new Map(reversalsRows.map((r) => [r.customerId, BigInt(r.total)]));
+    const refundsMap = new Map(refundsRows.map((r) => [r.customerId, BigInt(r.total)]));
+    const allocsMap = new Map(allocsRows.map((r) => [r.customerId, BigInt(r.total)]));
 
-    const credit = computeCustomerCreditAsOf(receipts, allocs, refunds);
-    customerCreditMap.set(customerId, Number(credit));
+    for (const customerId of customerIds) {
+      const rawReceipts = receiptsMap.get(customerId) ?? BigInt(0);
+      const rawReversals = reversalsMap.get(customerId) ?? BigInt(0);
+      const receipts = rawReceipts > rawReversals ? rawReceipts - rawReversals : BigInt(0);
+
+      const refunds = refundsMap.get(customerId) ?? BigInt(0);
+      const allocs = allocsMap.get(customerId) ?? BigInt(0);
+
+      const credit = computeCustomerCreditAsOf(receipts, allocs, refunds);
+      customerCreditMap.set(customerId, Number(credit));
+    }
   }
 
   // 5. Build customer rows with aged buckets

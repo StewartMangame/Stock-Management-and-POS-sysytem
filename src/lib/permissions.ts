@@ -11,7 +11,8 @@ export const PERMISSIONS = {
   ROLES_MANAGE: 'roles:manage',
   SETTINGS_VIEW: 'settings:view',
   SETTINGS_MANAGE: 'settings:manage',
-  AUDIT_LOG_VIEW: 'audit_log:view',
+  AUDIT_LOG_VIEW: 'audit_log:view',           // Manager: business events at own locations
+  AUDIT_LOG_VIEW_ALL: 'audit_log:view_all',   // Admin only: includes security events
   LOCATIONS_MANAGE: 'locations:manage',
 
   // ── Sales ─────────────────────────────────────────────────────────────
@@ -47,6 +48,9 @@ export const PERMISSIONS = {
   PAYMENTS_RECONCILE: 'payments:reconcile',
   PAYMENTS_REVERSE: 'payments:reverse',
   PAYMENTS_CHEQUE_CLEAR: 'payments:cheque_clear',
+  PAYMENTS_EXCEPTIONS: 'payments:exceptions',    // Exceptions tab in Payments Hub
+  STATEMENTS_MATCH: 'statements:match',          // Required with payments:record to record from statement line
+  PAYMENT_LINKS_MANAGE: 'payment_links:manage',  // Payment links tab in Payments Hub
 
   // ── POS / shifts ──────────────────────────────────────────────────────
   POS_ACCESS: 'pos:access',
@@ -56,6 +60,16 @@ export const PERMISSIONS = {
 
   // ── Reports ───────────────────────────────────────────────────────────
   REPORTS_VIEW: 'reports:view',
+  REPORTS_COST: 'reports:cost', // Cost, margin, profit columns — manager and admin only
+
+  // ── Accounting export ─────────────────────────────────────────────────
+  ACCOUNTING_VIEW: 'accounting:view',
+  ACCOUNTING_EXPORT: 'accounting:export',
+  ACCOUNTING_REEXPORT: 'accounting:reexport', // Manager override for second export
+  EIS_MANAGE: 'eis:manage',
+
+  // ── System checks ─────────────────────────────────────────────────────
+  SYSTEM_CHECKS_RUN: 'system_checks:run',
 
   // ── Approval gates ────────────────────────────────────────────────────
   DISCOUNTS_APPROVE: 'discounts:approve',
@@ -94,11 +108,20 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     PERMISSIONS.PAYMENTS_VIEW, PERMISSIONS.PAYMENTS_RECORD,
     PERMISSIONS.PAYMENTS_REFUND, PERMISSIONS.PAYMENTS_RECONCILE,
     PERMISSIONS.PAYMENTS_REVERSE, PERMISSIONS.PAYMENTS_CHEQUE_CLEAR,
+    PERMISSIONS.PAYMENTS_EXCEPTIONS,
+    PERMISSIONS.STATEMENTS_MATCH,
+    PERMISSIONS.PAYMENT_LINKS_MANAGE,
     // POS
     PERMISSIONS.POS_ACCESS, PERMISSIONS.SHIFTS_MANAGE,
     PERMISSIONS.POS_OVERRIDE, PERMISSIONS.POS_REPRINT_ANY,
-    // Reports + approvals
-    PERMISSIONS.REPORTS_VIEW,
+    // Reports (manager sees cost)
+    PERMISSIONS.REPORTS_VIEW, PERMISSIONS.REPORTS_COST,
+    // Accounting
+    PERMISSIONS.ACCOUNTING_VIEW, PERMISSIONS.ACCOUNTING_EXPORT, PERMISSIONS.ACCOUNTING_REEXPORT,
+    PERMISSIONS.EIS_MANAGE,
+    // System checks
+    PERMISSIONS.SYSTEM_CHECKS_RUN,
+    // Approvals
     PERMISSIONS.DISCOUNTS_APPROVE, PERMISSIONS.REFUNDS_APPROVE,
   ],
 
@@ -111,6 +134,7 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     PERMISSIONS.PRODUCTS_VIEW,
     PERMISSIONS.STOCK_VIEW,
     PERMISSIONS.REPORTS_VIEW,
+    // No REPORTS_COST — cost columns stripped server-side
   ],
 
   storekeeper: [
@@ -121,6 +145,7 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     PERMISSIONS.PURCHASE_ORDERS_VIEW, PERMISSIONS.PURCHASE_ORDERS_MANAGE,
     PERMISSIONS.GOODS_RECEIPTS_MANAGE,
     PERMISSIONS.REPORTS_VIEW,
+    // No REPORTS_COST — cost columns stripped server-side
   ],
 
   cashier: [
@@ -130,6 +155,7 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     PERMISSIONS.PRODUCTS_VIEW,
     PERMISSIONS.CUSTOMERS_VIEW,
     PERMISSIONS.STOCK_VIEW,
+    // No dashboard sales targets, no cash figure visibility (blind cash-up)
   ],
 
   viewer: [
@@ -144,5 +170,6 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     PERMISSIONS.SETTINGS_VIEW,
     PERMISSIONS.SUPPLIERS_VIEW,
     PERMISSIONS.PURCHASE_ORDERS_VIEW,
+    // No REPORTS_COST — viewer never sees cost/margin
   ],
 };

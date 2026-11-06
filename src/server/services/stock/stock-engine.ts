@@ -435,15 +435,20 @@ export async function rebuildStockBalances(tx: any): Promise<{
 
   // 6. Flush recomputed product costs to DB
   const productEntries = Array.from(productState.entries());
-  for (const [productId, state] of productEntries) {
-    await tx
-      .update(products)
-      .set({
-        avgCostMinor: state.avgCost,
-        lastCostMinor: state.lastCost,
-        updatedAt: new Date(),
-      })
-      .where(eq(products.id, productId));
+  if (productEntries.length > 0) {
+    const valueClauses = productEntries.map(
+      ([productId, state]) =>
+        sql`(${productId}::uuid, ${state.avgCost}::bigint, ${state.lastCost}::bigint)`
+    );
+    await tx.execute(sql`
+      UPDATE products AS p
+      SET
+        avg_cost_minor = c.avg_cost_minor,
+        last_cost_minor = c.last_cost_minor,
+        updated_at = NOW()
+      FROM (VALUES ${sql.join(valueClauses, sql`, `)}) AS c(id, avg_cost_minor, last_cost_minor)
+      WHERE p.id = c.id;
+    `);
   }
 
   return { balancesUpdated: balanceEntries.length, productsUpdated: productEntries.length };

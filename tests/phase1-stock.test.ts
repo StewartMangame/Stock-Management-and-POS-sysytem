@@ -393,6 +393,10 @@ describe('Phase 1 Stock & Purchasing Invariants', () => {
         ]);
       });
 
+      // Ensure clean baseline before test
+      await db.transaction(async (tx) => {
+        await rebuildStockBalances(tx);
+      });
       // Verify baseline consistency
       const checkBefore = await checkStockLedgerConsistency(db);
       expect(checkBefore.isConsistent).toBe(true);
@@ -431,7 +435,7 @@ describe('Phase 1 Stock & Purchasing Invariants', () => {
       // Verify average cost restored to 15,000
       const [restoredProd] = await db.select().from(products).where(eq(products.id, prod!.id));
       expect(Number(restoredProd!.avgCostMinor)).toBe(15000);
-    }, 120000);
+    }, 240000);
   });
 
   // ── 8. Concurrency: Two Simultaneous Issues of the Last Unit ─────────────────

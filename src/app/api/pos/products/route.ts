@@ -39,6 +39,13 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    // Default tax rate fallback
+    const [defaultTax] = await db
+      .select({ id: taxRates.id, name: taxRates.name, rateBasisPoints: taxRates.rateBasisPoints })
+      .from(taxRates)
+      .where(and(eq(taxRates.isDefault, true), eq(taxRates.isActive, true)))
+      .limit(1);
+
     // Select ONLY customer-facing product information and available stock for the location.
     // Cost fields are strictly excluded.
     const rows = await db
@@ -84,9 +91,9 @@ export async function GET(req: NextRequest) {
         sellingPriceMinor: r.sellingPriceMinor.toString(),
         isSerialTracked: r.isSerialTracked,
         isBundle: r.isBundle,
-        taxRateId: r.taxRateId,
-        taxRateName: r.taxRateName ?? 'Zero Rated',
-        taxRateBasisPoints: r.taxRateBasisPoints ?? 0,
+        taxRateId: r.taxRateId ?? defaultTax?.id ?? null,
+        taxRateName: r.taxRateName ?? defaultTax?.name ?? 'Zero Rated',
+        taxRateBasisPoints: r.taxRateBasisPoints ?? defaultTax?.rateBasisPoints ?? 0,
         availableQty: Number(r.availableQty || 0),
         onHandQty: Number(r.onHandQty || 0),
       })),

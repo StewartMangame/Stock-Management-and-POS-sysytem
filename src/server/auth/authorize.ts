@@ -20,7 +20,7 @@ import { db } from '@/server/db';
 import { users, roles } from '@/server/db/schema';
 import { eq } from 'drizzle-orm';
 import type { InferSelectModel } from 'drizzle-orm';
-import type { Permission } from '@/lib/permissions';
+import { PERMISSIONS, ROLE_PERMISSIONS, type Permission } from '@/lib/permissions';
 
 export class AuthorizationError extends Error {
   constructor(
@@ -64,14 +64,27 @@ export async function authorize(permission: Permission): Promise<AuthorizedUser>
     throw new AuthorizationError('ACCOUNT_INACTIVE', 'Account is inactive or not found.');
   }
 
-  if (!row.roles.permissions.includes(permission)) {
+  const roleName = row.roles.name?.toLowerCase() ?? '';
+  const isSystemAdmin = roleName === 'admin';
+  const configuredPerms = (ROLE_PERMISSIONS[roleName] ?? []) as string[];
+  const effectivePermissions = isSystemAdmin
+    ? (Object.values(PERMISSIONS) as string[])
+    : Array.from(new Set([...(row.roles.permissions ?? []), ...configuredPerms]));
+
+  if (!effectivePermissions.includes(permission)) {
     throw new AuthorizationError(
       'FORBIDDEN',
       `Permission '${permission}' is required.`,
     );
   }
 
-  return { ...row.users, role: row.roles } as AuthorizedUser;
+  return {
+    ...row.users,
+    role: {
+      ...row.roles,
+      permissions: effectivePermissions,
+    },
+  } as AuthorizedUser;
 }
 
 /**
@@ -92,5 +105,18 @@ export async function currentUser(): Promise<AuthorizedUser | null> {
   const row = result[0];
   if (!row || !row.users.isActive) return null;
 
-  return { ...row.users, role: row.roles } as AuthorizedUser;
+  const roleName = row.roles.name?.toLowerCase() ?? '';
+  const isSystemAdmin = roleName === 'admin';
+  const configuredPerms = (ROLE_PERMISSIONS[roleName] ?? []) as string[];
+  const effectivePermissions = isSystemAdmin
+    ? (Object.values(PERMISSIONS) as string[])
+    : Array.from(new Set([...(row.roles.permissions ?? []), ...configuredPerms]));
+
+  return {
+    ...row.users,
+    role: {
+      ...row.roles,
+      permissions: effectivePermissions,
+    },
+  } as AuthorizedUser;
 }

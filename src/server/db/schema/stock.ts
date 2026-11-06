@@ -222,7 +222,8 @@ export const stockMovements = pgTable(
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   },
   (t) => [
-    index('stock_movements_prod_loc_occurred_idx').on(t.productId, t.locationId, t.occurredAt),
+    // Phase 6: compound index includes seq for deterministic ledger replay order
+    index('stock_movements_prod_loc_occ_seq_idx').on(t.productId, t.locationId, t.occurredAt, t.seq),
     index('stock_movements_ref_idx').on(t.referenceType, t.referenceId),
     index('stock_movements_seq_idx').on(t.seq),
   ],

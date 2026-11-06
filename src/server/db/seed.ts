@@ -28,8 +28,10 @@ import {
   settings,
   taxRates,
   numberSequences,
+  accountMappings,
   type SettingKey,
 } from './schema';
+import { DEFAULT_ACCOUNT_MAPPINGS } from '../services/accounting/journal-engine';
 import { ROLE_PERMISSIONS } from '../../lib/permissions';
 
 neonConfig.webSocketConstructor = ws;
@@ -37,6 +39,13 @@ neonConfig.webSocketConstructor = ws;
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main() {
+  // ── PRODUCTION GUARD ──────────────────────────────────────────────────────
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      '[seed] REFUSED: Demo seed scripts must not run in NODE_ENV=production. ' +
+      'Use a proper migration and secure user-creation process for production environments.',
+    );
+  }
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error('DATABASE_URL is not set');
 
@@ -44,9 +53,10 @@ async function main() {
   if (!adminPassword) throw new Error('ADMIN_SEED_PASSWORD is not set');
 
   const pool = new Pool({ connectionString: databaseUrl });
-  const db = drizzle({ client: pool, schema: { locations, roles, users, settings, taxRates, numberSequences } });
+  try {
+    const db = drizzle({ client: pool, schema: { locations, roles, users, settings, taxRates, numberSequences } });
 
-  console.warn('[seed] Starting idempotent seed…');
+    console.warn('[seed] Starting idempotent seed…');
 
   // ── 1. Roles ──────────────────────────────────────────────────────────────
 
@@ -187,14 +197,34 @@ async function main() {
     console.warn('[seed] admin user: already exists, skipping');
   }
 
+  // ── 7. Accounting Default Placeholder Mappings (Milestone 7) ────────────────
+  for (const m of DEFAULT_ACCOUNT_MAPPINGS) {
+    await db
+      .insert(accountMappings)
+      .values({
+        eventType: m.eventType,
+        role: m.role,
+        accountCode: m.accountCode,
+        accountName: m.accountName,
+        description: m.description,
+        isPlaceholder: true,
+      })
+      .onConflictDoNothing();
+  }
+  console.warn('[seed] account mappings: placeholder mappings seeded');
+
   console.warn('[seed] Done.');
-  await pool.end();
+  } finally {
+    await pool.end();
+  }
 }
 
-main().catch((err) => {
-  console.error('[seed] Fatal error:', err);
-  process.exit(1);
-});
+if (process.env.NODE_ENV !== 'test') {
+  main().catch((err) => {
+    console.error('[seed] Fatal error:', err);
+    process.exit(1);
+  });
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Export for integration tests

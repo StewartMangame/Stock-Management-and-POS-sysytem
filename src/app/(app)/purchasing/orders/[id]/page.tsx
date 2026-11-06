@@ -18,6 +18,7 @@ import { formatMwk } from '@/lib/money';
 import { formatDateTime } from '@/lib/utils';
 import { ArrowLeft, Building2, MapPin, Calendar, Receipt, FileText } from 'lucide-react';
 import { PODetailActions } from './PODetailActions';
+import { EntityHistoryTab } from '@/components/shared/EntityHistoryTab';
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -288,6 +289,9 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
           </Table>
         </div>
       )}
+
+      {/* Historical Audit Log Timeline */}
+      <EntityHistoryTab entityType="purchase_order" entityId={po.id} />
     </div>
   );
 }

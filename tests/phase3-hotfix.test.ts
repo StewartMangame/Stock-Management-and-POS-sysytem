@@ -50,6 +50,7 @@ import { getPaymentsReport } from '@/server/services/reports/payments-report';
 import { getCustomerStatement } from '@/server/services/reports/customer-statement';
 import { getAgedDebtors } from '@/server/services/reports/aged-debtors';
 import { todayInCompanyTz, setClock, resetClock } from '@/lib/timezone';
+import { executeStockMovements } from '@/server/services/stock/stock-engine';
 
 let testLocId: string;
 let testCustId: string;
@@ -146,13 +147,17 @@ beforeAll(async () => {
     .returning();
   testProductId = prod!.id;
 
-  // 5. Stock Balances
-  await db.insert(stockBalances).values({
-    productId: testProductId,
-    locationId: testLocId,
-    onHand: '1000.000',
-    reserved: '0.000',
-  });
+  // 5. Stock Balances via ledger movement
+  await executeStockMovements(db, [
+    {
+      productId: testProductId,
+      locationId: testLocId,
+      quantity: 1000,
+      unitCostMinor: 10000,
+      movementType: 'purchase_receipt',
+      referenceType: 'goods_receipt',
+    },
+  ]);
 });
 
 async function createIssuedInvoice(customerId: string, amountMinor: number, issueDateStr: string = todayInCompanyTz()) {

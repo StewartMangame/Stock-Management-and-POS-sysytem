@@ -128,6 +128,8 @@ export const SETTING_KEYS = [
   'reservation_hold_days',
   'pos_blind_cash_up',
   'pos_return_window_days',
+  'cost_variance_threshold_percent',
+  'cost_above_selling_price_threshold_percent',
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -203,8 +205,9 @@ export const auditLog = pgTable(
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index('audit_log_entity_idx').on(t.entityType, t.entityId),
-    index('audit_log_at_idx').on(t.at),
+    // Phase 6: composite indexes for keyset pagination and entity history tab
+    index('audit_log_entity_at_idx').on(t.entityType, t.entityId, t.at),
+    index('audit_log_at_id_idx').on(t.at, t.id),
     index('audit_log_user_idx').on(t.userId),
   ],
 );

@@ -34,6 +34,7 @@ import { XReportModal } from './XReportModal';
 import { CashMovementModal } from './CashMovementModal';
 import { CloseShiftModal } from './CloseShiftModal';
 import { toast } from 'sonner';
+import { EntityHistoryTab } from '@/components/shared/EntityHistoryTab';
 
 interface ShiftsClientProps {
   currentShift: any | null;
@@ -327,6 +328,14 @@ export function ShiftsClient({
           </div>
         </CardContent>
       </Card>
+
+      {/* Historical Audit Log Timeline — visible only to reviewers (managers/admins) */}
+      {canReview && (activeShift || shiftHistory[0]) && (
+        <EntityHistoryTab
+          entityType="pos_shift"
+          entityId={(activeShift?.id || shiftHistory[0]?.id) as string}
+        />
+      )}
 
       {/* Review Dialog */}
       {reviewingShift && (
