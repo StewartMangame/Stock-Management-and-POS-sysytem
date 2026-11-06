@@ -27,9 +27,17 @@ interface CustomerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   customer?: Customer | null;
+  initialName?: string;
+  onCustomerCreated?: (customer: Customer) => void;
 }
 
-export function CustomerDialog({ open, onOpenChange, customer }: CustomerDialogProps) {
+export function CustomerDialog({
+  open,
+  onOpenChange,
+  customer,
+  initialName,
+  onCustomerCreated,
+}: CustomerDialogProps) {
   const router = useRouter();
   const isEditing = Boolean(customer);
 
@@ -45,7 +53,6 @@ export function CustomerDialog({ open, onOpenChange, customer }: CustomerDialogP
     try {
       const formData = new FormData(e.currentTarget);
       const name = formData.get('name') as string;
-      const accountNumber = (formData.get('accountNumber') as string) || undefined;
       const email = (formData.get('email') as string) || undefined;
       const phone = (formData.get('phone') as string) || undefined;
       const address = (formData.get('address') as string) || undefined;
@@ -67,10 +74,9 @@ export function CustomerDialog({ open, onOpenChange, customer }: CustomerDialogP
         });
         toast.success('Customer updated successfully');
       } else {
-        await createCustomerAction({
+        const result = await createCustomerAction({
           name,
           customerType,
-          accountNumber,
           email,
           phone,
           address,
@@ -78,7 +84,8 @@ export function CustomerDialog({ open, onOpenChange, customer }: CustomerDialogP
           creditLimitMinor,
           paymentTermsDays,
         });
-        toast.success('Customer created successfully');
+        onCustomerCreated?.(result.customer);
+        toast.success(`Customer created successfully: ${result.customer.accountNumber}`);
       }
 
       onOpenChange(false);
@@ -120,22 +127,11 @@ export function CustomerDialog({ open, onOpenChange, customer }: CustomerDialogP
             <Input
               id="name"
               name="name"
-              defaultValue={customer?.name}
+              defaultValue={customer?.name ?? initialName}
               required
               placeholder="e.g. Acme Corporation"
             />
           </div>
-
-          {!isEditing && (
-            <div className="space-y-1">
-              <Label htmlFor="accountNumber">Account Number (Optional)</Label>
-              <Input
-                id="accountNumber"
-                name="accountNumber"
-                placeholder="Auto-generated if left blank"
-              />
-            </div>
-          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">

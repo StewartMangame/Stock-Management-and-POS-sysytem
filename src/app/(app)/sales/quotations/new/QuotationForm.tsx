@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
@@ -27,6 +27,8 @@ import { Trash2, Plus, ArrowLeft, Calculator, Eye, Edit3 } from 'lucide-react';
 import { createQuotationAction } from '../actions';
 import { calculateSalesLine, calculateDocumentTotals } from '@/lib/sales-math';
 import { QuotationDocumentView } from '@/components/quotations/QuotationDocumentView';
+import { CustomerDialog } from '../../customers/CustomerDialog';
+import type { Customer } from '@/server/services/sales/customers';
 
 interface CustomerOption {
   id: string;
@@ -54,6 +56,7 @@ interface LocationOption {
 
 interface QuotationFormProps {
   customers: CustomerOption[];
+  canCreateCustomers: boolean;
   products: ProductOption[];
   locations: LocationOption[];
   defaultTaxRateId: string;
@@ -69,6 +72,7 @@ interface FormLine {
 
 export function QuotationForm({
   customers,
+  canCreateCustomers,
   products,
   locations,
   defaultTaxRateId,
@@ -77,7 +81,11 @@ export function QuotationForm({
   const [isPending, startTransition] = useTransition();
   const [activeTab, setActiveTab] = useState<'editor' | 'preview'>('editor');
 
+  const [customerOptions, setCustomerOptions] = useState(customers);
   const [customerId, setCustomerId] = useState('');
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
   const [locationId, setLocationId] = useState(locations[0]?.id || '');
   const [quotationDate, setQuotationDate] = useState(new Date().toISOString().slice(0, 10));
   const [validUntil, setValidUntil] = useState(
@@ -92,7 +100,33 @@ export function QuotationForm({
     { productId: '', quantity: '1', unitPriceMwk: '', discountMwk: '0', description: '' },
   ]);
 
-  const selectedCustomer = customers.find((c) => c.id === customerId);
+  const selectedCustomer = customerOptions.find((c) => c.id === customerId);
+  const filteredCustomers = useMemo(() => {
+    const query = customerSearch.trim().toLowerCase();
+    if (!query) return customerOptions;
+    return customerOptions.filter((customer) =>
+      `${customer.name} ${customer.accountNumber}`.toLowerCase().includes(query),
+    );
+  }, [customerOptions, customerSearch]);
+
+  function selectCustomer(customer: CustomerOption) {
+    setCustomerId(customer.id);
+    setCustomerSearch(`${customer.name} (${customer.accountNumber})`);
+    setCustomerSearchOpen(false);
+  }
+
+  function handleCustomerCreated(customer: Customer) {
+    const newCustomer: CustomerOption = {
+      id: customer.id,
+      name: customer.name,
+      accountNumber: customer.accountNumber,
+      address: customer.address,
+      isWalkIn: customer.isWalkIn,
+      creditLimitMinor: customer.creditLimitMinor,
+    };
+    setCustomerOptions((previous) => [...previous, newCustomer]);
+    selectCustomer(newCustomer);
+  }
 
   // Helper map for fast product lookup
   const prodMap = new Map(products.map((p) => [p.id, p]));
@@ -322,18 +356,76 @@ export function QuotationForm({
             <CardContent className="pt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="space-y-1">
                 <Label htmlFor="customer">Customer *</Label>
-                <Select value={customerId} onValueChange={setCustomerId}>
-                  <SelectTrigger id="customer">
-                    <SelectValue placeholder="Select a customer" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {customers.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name} ({c.accountNumber})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="relative">
+                  <Input
+                    id="customer"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded={customerSearchOpen}
+                    aria-controls="quotation-customer-options"
+                    autoComplete="off"
+                    placeholder="Search customers by name or account..."
+                    value={customerSearch}
+                    onFocus={() => setCustomerSearchOpen(true)}
+                    onBlur={() => {
+                      window.setTimeout(() => setCustomerSearchOpen(false), 150);
+                    }}
+                    onChange={(event) => {
+                      setCustomerSearch(event.target.value);
+                      setCustomerId('');
+                      setCustomerSearchOpen(true);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') setCustomerSearchOpen(false);
+                    }}
+                  />
+                  {customerSearchOpen && (
+                    <div
+                      id="quotation-customer-options"
+                      role="listbox"
+                      className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border bg-white p-1 shadow-lg"
+                    >
+                      {filteredCustomers.length > 0 ? (
+                        filteredCustomers.map((customer) => (
+                          <button
+                            key={customer.id}
+                            type="button"
+                            role="option"
+                            aria-selected={customer.id === customerId}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => selectCustomer(customer)}
+                            className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm hover:bg-muted"
+                          >
+                            <span>{customer.name}</span>
+                            <span className="ml-3 text-xs text-muted-foreground">
+                              {customer.accountNumber}
+                            </span>
+                          </button>
+                        ))
+                      ) : (
+                        <p className="px-3 py-2 text-sm text-muted-foreground">
+                          No matching customers found.
+                        </p>
+                      )}
+                      {canCreateCustomers && (
+                        <button
+                          type="button"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            setCustomerSearchOpen(false);
+                            setCustomerDialogOpen(true);
+                          }}
+                          className="flex w-full items-center gap-2 rounded border-t px-3 py-2 text-left text-sm font-medium text-ace-navy hover:bg-muted"
+                        >
+                          <Plus className="h-4 w-4" />
+                          {customerSearch.trim()
+                            ? `Create customer "${customerSearch.trim()}"`
+                            : 'Create a new customer'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
                 {selectedCustomer && (
                   <p className="text-[11px] text-muted-foreground font-mono">
                     {selectedCustomer.isWalkIn
@@ -579,6 +671,14 @@ export function QuotationForm({
             </Card>
           </div>
         </>
+      )}
+      {canCreateCustomers && (
+        <CustomerDialog
+          open={customerDialogOpen}
+          onOpenChange={setCustomerDialogOpen}
+          initialName={customerSearch.trim()}
+          onCustomerCreated={handleCustomerCreated}
+        />
       )}
     </form>
   );
