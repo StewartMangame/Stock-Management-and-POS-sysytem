@@ -426,13 +426,13 @@ export async function createCounterSale(
 
     // Check available stock for each non-bundle, non-service line
     for (const { lineInput, product } of resolvedLines) {
-      if (product.productType === 'service') continue;
+      if (product.productType === 'service' || product.productType === 'non-inventory') continue;
       if (product.productType === 'bundle') {
         // Check component stock
         const components = bundleComponentsMap.get(product.id) ?? [];
         for (const comp of components) {
           const compProd = lockedProdMap.get(comp.componentProductId);
-          if (!compProd || compProd.productType === 'service') continue;
+          if (!compProd || compProd.productType === 'service' || compProd.productType === 'non-inventory') continue;
           const compQty = new Decimal(lineInput.quantity).times(comp.quantity);
           const [bal] = await tx
             .select({ available: stockBalances.available })
@@ -628,8 +628,8 @@ export async function createCounterSale(
       const invLine = insertedLines[i]!;
       const requestedQty = new Decimal(lineInput.quantity);
 
-      if (product.productType === 'service') {
-        // No stock movement for services
+      if (product.productType === 'service' || product.productType === 'non-inventory') {
+        // No stock movement for services or non-inventory items
         await tx.insert(deliveryNoteLines).values({
           deliveryNoteId: deliveryNote!.id,
           salesDocumentLineId: invLine.id,

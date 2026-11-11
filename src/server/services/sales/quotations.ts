@@ -329,8 +329,8 @@ export async function acceptQuotation(
     // Reserve stock for each line
     for (const line of lines) {
       const prod = prodMap.get(line.productId);
-      if (!prod || prod.productType === 'service') {
-        continue; // Services don't require stock reservation
+      if (!prod || prod.productType === 'service' || prod.productType === 'non-inventory') {
+        continue; // Services and non-inventory items don't require stock reservation
       }
 
       if (prod.productType === 'bundle') {

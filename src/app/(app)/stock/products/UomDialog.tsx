@@ -13,9 +13,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { createUomAction, updateUomAction } from './actions';
+import { createUomAction } from './actions';
 
-interface UOMItem {
+export interface UOMItem {
   id: string;
   name: string;
   code: string;
@@ -28,9 +28,10 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   uom?: UOMItem | null;
+  onSuccess?: (uom: UOMItem) => void;
 }
 
-export function UomDialog({ open, onOpenChange, uom }: Props) {
+export function UomDialog({ open, onOpenChange, uom, onSuccess }: Props) {
   const [isPending, startTransition] = useTransition();
 
   const [name, setName] = useState('');
@@ -73,12 +74,10 @@ export function UomDialog({ open, onOpenChange, uom }: Props) {
           isActive,
         };
 
-        if (uom) {
-          await updateUomAction(uom.id, payload);
-          toast.success('Unit of measure updated successfully');
-        } else {
-          await createUomAction(payload);
-          toast.success('Unit of measure created successfully');
+        const res = await createUomAction(payload);
+        toast.success('Unit of measure created successfully');
+        if (res?.uom && onSuccess) {
+          onSuccess(res.uom as UOMItem);
         }
         onOpenChange(false);
       } catch (err: any) {
@@ -99,9 +98,15 @@ export function UomDialog({ open, onOpenChange, uom }: Props) {
             <Label htmlFor="uom-name">Name *</Label>
             <Input
               id="uom-name"
-              placeholder="e.g. Kilogram, Piece, Box"
+              placeholder="e.g. Kilogram, Piece, Box, Roll"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setName(val);
+                if (!code && val.length <= 4) {
+                  setCode(val.toUpperCase());
+                }
+              }}
               required
             />
           </div>
@@ -111,7 +116,7 @@ export function UomDialog({ open, onOpenChange, uom }: Props) {
               <Label htmlFor="uom-code">Code *</Label>
               <Input
                 id="uom-code"
-                placeholder="e.g. KG, PCS"
+                placeholder="e.g. KG, PCS, ROL"
                 value={code}
                 onChange={(e) => setCode(e.target.value.toUpperCase())}
                 required
@@ -121,7 +126,7 @@ export function UomDialog({ open, onOpenChange, uom }: Props) {
               <Label htmlFor="uom-symbol">Symbol *</Label>
               <Input
                 id="uom-symbol"
-                placeholder="e.g. kg, pcs, box"
+                placeholder="e.g. kg, pcs, rl"
                 value={symbol}
                 onChange={(e) => setSymbol(e.target.value)}
                 required
@@ -145,17 +150,6 @@ export function UomDialog({ open, onOpenChange, uom }: Props) {
             />
           </div>
 
-          <div className="flex items-center justify-between pt-2">
-            <Label htmlFor="uom-active" className="cursor-pointer">
-              Active Unit
-            </Label>
-            <Switch
-              id="uom-active"
-              checked={isActive}
-              onCheckedChange={setIsActive}
-            />
-          </div>
-
           <DialogFooter className="pt-4">
             <Button
               type="button"
@@ -165,7 +159,7 @@ export function UomDialog({ open, onOpenChange, uom }: Props) {
               Cancel
             </Button>
             <Button type="submit" disabled={isPending}>
-              {isPending ? 'Saving...' : uom ? 'Update Unit' : 'Create Unit'}
+              {isPending ? 'Saving...' : 'Create Unit'}
             </Button>
           </DialogFooter>
         </form>
@@ -173,3 +167,4 @@ export function UomDialog({ open, onOpenChange, uom }: Props) {
     </Dialog>
   );
 }
+

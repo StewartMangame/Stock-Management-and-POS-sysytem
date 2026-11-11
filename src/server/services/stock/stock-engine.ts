@@ -90,10 +90,10 @@ export async function executeStockMovements(
     lockedProductsMap.set(pId, p);
   }
 
-  // Filter out services (product_type === 'service' creates no movements or balance rows)
+  // Filter out services and non-inventory items (they create no movements or balance rows)
   const stockItems = items.filter((it) => {
     const prod = lockedProductsMap.get(it.productId);
-    return prod && prod.productType !== 'service';
+    return prod && prod.productType !== 'service' && prod.productType !== 'non-inventory';
   });
 
   if (stockItems.length === 0) {

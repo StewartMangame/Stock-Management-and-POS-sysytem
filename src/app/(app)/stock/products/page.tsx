@@ -42,6 +42,8 @@ export default async function ProductsPage({
 
   const typeIcon: Record<string, React.ReactNode> = {
     standard: <Package className="h-3.5 w-3.5" />,
+    inventory: <Package className="h-3.5 w-3.5" />,
+    'non-inventory': <Layers className="h-3.5 w-3.5" />,
     bundle: <Layers className="h-3.5 w-3.5" />,
     service: <Wrench className="h-3.5 w-3.5" />,
   };
@@ -96,9 +98,10 @@ export default async function ProductsPage({
           id="product-type-filter"
         >
           <option value="">All Types</option>
-          <option value="standard">Standard</option>
-          <option value="bundle">Bundle</option>
+          <option value="inventory">Inventory</option>
+          <option value="non-inventory">Non-Inventory</option>
           <option value="service">Service</option>
+          <option value="bundle">Bundle</option>
         </select>
         <label className="flex items-center gap-2 text-sm text-ace-navy cursor-pointer">
           <input type="checkbox" name="lowstock" value="1" defaultChecked={sp.lowstock === '1'} className="accent-ace-blue" id="lowstock-filter" />
@@ -137,7 +140,8 @@ export default async function ProductsPage({
               productList.map((p) => {
                 const totalOnHand = p.stockBalances.reduce((s, b) => s + parseFloat(b.onHand ?? '0'), 0);
                 const minAlert = parseFloat(p.minStockAlert ?? '0');
-                const isLowStock = p.productType !== 'service' && minAlert > 0 && totalOnHand <= minAlert;
+                const isNoStock = p.productType === 'service' || p.productType === 'non-inventory';
+                const isLowStock = !isNoStock && minAlert > 0 && totalOnHand <= minAlert;
 
                 return (
                   <TableRow key={p.id} className="group">
@@ -167,11 +171,11 @@ export default async function ProductsPage({
                       {formatMwk(p.sellingPriceMinor)}
                     </TableCell>
                     <TableCell className="text-right text-sm font-mono text-ace-muted">
-                      {p.productType === 'service' ? '—' : formatMwk(p.avgCostMinor ?? 0)}
+                      {isNoStock ? '—' : formatMwk(p.avgCostMinor ?? 0)}
                     </TableCell>
                     <TableCell>
-                      {p.productType === 'service' ? (
-                        <span className="text-xs text-ace-muted">Service</span>
+                      {isNoStock ? (
+                        <span className="text-xs text-ace-muted capitalize">{p.productType}</span>
                       ) : (
                         <span className={`text-sm font-semibold ${isLowStock ? 'text-amber-600' : 'text-ace-navy'}`}>
                           {totalOnHand.toFixed(p.uom?.allowDecimal ? 3 : 0)}

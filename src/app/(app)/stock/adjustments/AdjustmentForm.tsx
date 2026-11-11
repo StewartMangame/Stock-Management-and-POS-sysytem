@@ -38,7 +38,9 @@ export function AdjustmentForm({ locations, products }: Props) {
     { productId: '', quantity: '1', unitCostMinorInput: '', serialNumbers: '' },
   ]);
 
-  const stockableProducts = products.filter((p) => p.productType !== 'service');
+  const stockableProducts = products.filter(
+    (p) => p.productType !== 'service' && p.productType !== 'non-inventory',
+  );
 
   const addLine = () =>
     setLines((prev) => [...prev, { productId: '', quantity: '1', unitCostMinorInput: '', serialNumbers: '' }]);

@@ -29,6 +29,7 @@ import {
   taxRates,
   numberSequences,
   accountMappings,
+  unitsOfMeasure,
   type SettingKey,
 } from './schema';
 import { DEFAULT_ACCOUNT_MAPPINGS } from '../services/accounting/journal-engine';
@@ -98,6 +99,29 @@ async function main() {
   if (!location) throw new Error('Failed to insert location');
   const locationId = location.id;
   console.warn(`[seed] location: Main Outlet (${locationId})`);
+
+  // ── 2b. Units of Measure ──────────────────────────────────────────────────
+
+  const defaultUoms = [
+    { name: 'Each', code: 'EA', symbol: 'ea', allowDecimal: false },
+    { name: 'Box', code: 'BOX', symbol: 'bx', allowDecimal: false },
+    { name: 'Pack', code: 'PK', symbol: 'pk', allowDecimal: false },
+    { name: 'Set', code: 'SET', symbol: 'set', allowDecimal: false },
+    { name: 'Kilogram', code: 'KG', symbol: 'kg', allowDecimal: true },
+    { name: 'Gram', code: 'G', symbol: 'g', allowDecimal: true },
+    { name: 'Litre', code: 'L', symbol: 'L', allowDecimal: true },
+    { name: 'Millilitre', code: 'ML', symbol: 'mL', allowDecimal: true },
+    { name: 'Metre', code: 'M', symbol: 'm', allowDecimal: true },
+    { name: 'Hour', code: 'HR', symbol: 'hr', allowDecimal: true },
+  ];
+
+  for (const u of defaultUoms) {
+    await db
+      .insert(unitsOfMeasure)
+      .values(u)
+      .onConflictDoNothing();
+  }
+  console.warn(`[seed] units of measure: ${defaultUoms.length} defaults checked`);
 
   // ── 3. Tax rate ───────────────────────────────────────────────────────────
 

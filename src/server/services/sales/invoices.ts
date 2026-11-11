@@ -490,7 +490,7 @@ export async function issueInvoice(
     if (existingReservations.length === 0) {
       for (const line of lines) {
         const prod = prodMap.get(line.productId);
-        if (!prod || prod.productType === 'service') continue;
+        if (!prod || prod.productType === 'service' || prod.productType === 'non-inventory') continue;
 
         if (prod.productType === 'bundle') {
           const components = bundleComponentsMap.get(prod.id) || [];

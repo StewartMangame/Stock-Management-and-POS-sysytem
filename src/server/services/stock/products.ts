@@ -10,6 +10,7 @@ import {
 } from '@/server/db/schema';
 import { eq, and, sql, desc, asc, ilike } from 'drizzle-orm';
 import { writeAuditLog } from '@/server/services/audit';
+import { executeStockMovements } from '@/server/services/stock/stock-engine';
 
 export interface ProductInput {
   name: string;
@@ -18,7 +19,9 @@ export interface ProductInput {
   description?: string | null;
   categoryId?: string | null;
   uomId: string;
-  productType?: 'standard' | 'bundle' | 'service';
+  productType?: 'standard' | 'inventory' | 'non-inventory' | 'bundle' | 'service';
+  productDate?: string | null;   // 'YYYY-MM-DD'
+  imageUrl?: string | null;
   sellingPriceMinor: number;
   taxRateId?: string | null;
   minStockAlert?: string | number | null;
@@ -27,6 +30,11 @@ export interface ProductInput {
   warrantyMonths?: number;
   isActive?: boolean;
   bundleComponents?: Array<{ componentProductId: string; quantity: string | number }>;
+  // Initial stock for new inventory products
+  initialQuantity?: string | number | null;
+  initialLocationId?: string | null;
+  initialUnitCostMinor?: number | null;
+  initialSerialNumbers?: string[];
 }
 
 export async function listProducts(options?: {
@@ -72,7 +80,7 @@ export async function listProducts(options?: {
 
   if (options?.lowStockOnly) {
     return result.filter((p) => {
-      if (p.productType === 'service') return false;
+      if (p.productType === 'service' || p.productType === 'non-inventory') return false;
       const minAlert = parseFloat(p.minStockAlert ?? '0');
       if (minAlert <= 0) return false;
 
@@ -111,8 +119,9 @@ export async function createProduct(input: ProductInput, actorId?: string) {
   const sku = input.sku.trim().toUpperCase();
 
   const productType = input.productType ?? 'standard';
-  // Services cannot have serial tracking
-  const serialTracking = productType === 'service' ? false : (input.serialTracking ?? false);
+  // Services and non-inventory items cannot have serial tracking
+  const noStock = productType === 'service' || productType === 'non-inventory';
+  const serialTracking = noStock ? false : (input.serialTracking ?? false);
 
   const [created] = await db.transaction(async (tx) => {
     const [p] = await tx
@@ -125,6 +134,8 @@ export async function createProduct(input: ProductInput, actorId?: string) {
         categoryId: input.categoryId || null,
         uomId: input.uomId,
         productType,
+        productDate: input.productDate || undefined,
+        imageUrl: input.imageUrl || null,
         avgCostMinor: 0, // system maintained on goods receipts
         lastCostMinor: 0, // system maintained
         sellingPriceMinor: input.sellingPriceMinor ?? 0,
@@ -146,6 +157,40 @@ export async function createProduct(input: ProductInput, actorId?: string) {
           componentProductId: comp.componentProductId,
           quantity: String(comp.quantity),
         });
+      }
+    }
+
+    // Initial stock recording for inventory products
+    const initialQty = input.initialQuantity ? parseFloat(String(input.initialQuantity)) : 0;
+    if (initialQty > 0 && (productType === 'inventory' || productType === 'standard')) {
+      let locId = input.initialLocationId;
+      if (!locId) {
+        const [firstLoc] = await tx
+          .select({ id: locations.id })
+          .from(locations)
+          .where(eq(locations.isActive, true))
+          .limit(1);
+        locId = firstLoc?.id;
+      }
+
+      if (locId) {
+        await executeStockMovements(
+          tx,
+          [
+            {
+              productId: p!.id,
+              locationId: locId,
+              quantity: initialQty,
+              unitCostMinor: input.initialUnitCostMinor ?? 0,
+              movementType: 'opening',
+              referenceType: 'opening_stock',
+              referenceId: p!.id,
+              notes: 'Initial opening stock',
+              serialNumbers: input.initialSerialNumbers,
+            },
+          ],
+          actorId,
+        );
       }
     }
 
@@ -182,11 +227,14 @@ export async function updateProduct(
   if (input.minStockAlert !== undefined)
     updateData['minStockAlert'] = input.minStockAlert ? String(input.minStockAlert) : '0';
   if (input.maxStock !== undefined) updateData['maxStock'] = input.maxStock ? String(input.maxStock) : null;
-  if (input.serialTracking !== undefined && existing.productType !== 'service') {
+  const noStockExisting = existing.productType === 'service' || existing.productType === 'non-inventory';
+  if (input.serialTracking !== undefined && !noStockExisting) {
     updateData['serialTracking'] = input.serialTracking;
   }
   if (input.warrantyMonths !== undefined) updateData['warrantyMonths'] = input.warrantyMonths;
   if (input.isActive !== undefined) updateData['isActive'] = input.isActive;
+  if (input.productDate !== undefined) updateData['productDate'] = input.productDate;
+  if (input.imageUrl !== undefined) updateData['imageUrl'] = input.imageUrl || null;
 
   const [updated] = await db.transaction(async (tx) => {
     const [p] = await tx

@@ -99,7 +99,7 @@ export async function createStockCount(input: StockCountInput, actorId?: string)
       });
 
       for (const b of balances) {
-        if (b.product.productType === 'service') continue;
+        if (b.product.productType === 'service' || b.product.productType === 'non-inventory') continue;
         await tx.insert(stockCountItems).values({
           countId: header!.id,
           productId: b.productId,

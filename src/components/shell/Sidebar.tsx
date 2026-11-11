@@ -70,7 +70,6 @@ const NAV_GROUPS: NavItem[] = [
       { label: 'Stock Counts', href: '/stock/counts', permission: PERMISSIONS.STOCK_COUNT },
       { label: 'Serial Numbers', href: '/stock/serials', permission: PERMISSIONS.SERIALS_VIEW },
       { label: 'Categories', href: '/stock/categories', permission: PERMISSIONS.PRODUCTS_MANAGE },
-      { label: 'Units of Measure', href: '/stock/units', permission: PERMISSIONS.PRODUCTS_MANAGE },
       { label: 'Import CSV', href: '/stock/products/import', permission: PERMISSIONS.PRODUCTS_MANAGE },
     ],
   },

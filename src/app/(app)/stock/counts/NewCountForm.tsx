@@ -31,7 +31,9 @@ export function NewCountForm({ locations, products }: Props) {
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<CountLine[]>([{ productId: '', countedQty: '0' }]);
 
-  const stockableProducts = products.filter((p) => p.productType !== 'service');
+  const stockableProducts = products.filter(
+    (p) => p.productType !== 'service' && p.productType !== 'non-inventory',
+  );
 
   const addLine = () => setLines((prev) => [...prev, { productId: '', countedQty: '0' }]);
   const removeLine = (i: number) => setLines((prev) => prev.filter((_, idx) => idx !== i));

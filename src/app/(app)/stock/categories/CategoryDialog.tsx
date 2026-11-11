@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/select';
 import { createCategoryAction, updateCategoryAction } from './actions';
 
-interface CategoryItem {
+export interface CategoryItem {
   id: string;
   name: string;
   code: string;
@@ -35,10 +35,11 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   category?: CategoryItem | null;
-  allCategories: CategoryItem[];
+  allCategories?: CategoryItem[];
+  onSuccess?: (category: CategoryItem) => void;
 }
 
-export function CategoryDialog({ open, onOpenChange, category, allCategories }: Props) {
+export function CategoryDialog({ open, onOpenChange, category, allCategories = [], onSuccess }: Props) {
   const [isPending, startTransition] = useTransition();
 
   const [name, setName] = useState('');
@@ -82,11 +83,17 @@ export function CategoryDialog({ open, onOpenChange, category, allCategories }: 
         };
 
         if (category) {
-          await updateCategoryAction(category.id, payload);
+          const res = await updateCategoryAction(category.id, payload);
           toast.success('Category updated successfully');
+          if (res?.cat && onSuccess) {
+            onSuccess(res.cat as CategoryItem);
+          }
         } else {
-          await createCategoryAction(payload);
+          const res = await createCategoryAction(payload);
           toast.success('Category created successfully');
+          if (res?.cat && onSuccess) {
+            onSuccess(res.cat as CategoryItem);
+          }
         }
         onOpenChange(false);
       } catch (err: any) {

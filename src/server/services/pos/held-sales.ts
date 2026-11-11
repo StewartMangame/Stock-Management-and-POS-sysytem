@@ -224,7 +224,8 @@ export async function recallHeldSale(
     const currentPrice = prod.sellingPriceMinor > 0 ? prod.sellingPriceMinor : prod.avgCostMinor;
     const priceChanged = currentPrice !== line.unitPriceMinor;
     const available = stockMap.get(prod.id) ?? 0;
-    const stockInsufficient = prod.productType !== 'service' && available < line.quantity;
+    const stockInsufficient =
+      prod.productType !== 'service' && prod.productType !== 'non-inventory' && available < line.quantity;
 
     if (priceChanged || stockInsufficient) hasWarnings = true;
 

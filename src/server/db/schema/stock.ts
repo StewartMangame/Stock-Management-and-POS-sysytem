@@ -88,8 +88,12 @@ export const products = pgTable(
     uomId: uuid('uom_id')
       .notNull()
       .references(() => unitsOfMeasure.id, { onDelete: 'restrict' }),
-    /** 'standard' | 'bundle' | 'service' */
+    /** 'standard' | 'inventory' | 'non-inventory' | 'bundle' | 'service' */
     productType: text('product_type').notNull().default('standard'),
+    /** Product registration / creation date (user-set). Stored as DATE. */
+    productDate: date('product_date').notNull().defaultNow(),
+    /** Optional image URL for product display */
+    imageUrl: text('image_url'),
     /**
      * Company-wide weighted average cost in tambala (1/100 MWK).
      * System maintained across all locations — read only, never directly edited by users.

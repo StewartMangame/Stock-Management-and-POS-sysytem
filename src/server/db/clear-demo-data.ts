@@ -5,7 +5,7 @@
  * operational configuration:
  *   ✓ KEPT : roles, users (admin), locations, settings, tax_rates,
  *            number_sequences (reset to 0), account_mappings,
- *            and the system Walk-in customer ('WALK-IN').
+ *            units_of_measure, and the system Walk-in customer ('WALK-IN').
  *   ✗ WIPED: everything else – demo customers, products, suppliers, orders,
  *            stock, sales, payments, accounting entries, POS, integrations, audit log …
  *
@@ -82,7 +82,6 @@ const TRUNCATE_TABLES: string[] = [
   'product_bundles',
   'products',
   'categories',
-  'units_of_measure',
 
   // ── Setup (transactional only) ────────────────────────────────────────────
   'attachments',
