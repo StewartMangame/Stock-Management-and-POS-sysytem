@@ -5,10 +5,15 @@
 
 import crypto from 'node:crypto';
 import { EisAdapter, EisSubmissionPayload, EisSubmissionResponse } from './types';
+import { assertMocksAllowed } from '@/lib/env';
 
 export class MockEisAdapter implements EisAdapter {
   public name = 'mock_mra_eis';
   public shouldFail = false;
+
+  constructor() {
+    assertMocksAllowed('MRA EIS Adapter');
+  }
 
   async submit(payload: EisSubmissionPayload): Promise<EisSubmissionResponse> {
     if (this.shouldFail) {

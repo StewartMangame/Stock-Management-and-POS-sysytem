@@ -1,33 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { runCronJob } from '@/server/services/cron-helper';
 import { expireOutdatedReservations } from '@/server/services/sales/cron';
 
-export async function GET(request: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) {
-    return NextResponse.json(
-      { error: 'CRON_SECRET environment variable is not configured' },
-      { status: 500 },
-    );
-  }
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
-  const authHeader = request.headers.get('authorization');
-  const customHeader = request.headers.get('x-cron-secret');
-
-  const isBearerMatch = authHeader === `Bearer ${cronSecret}`;
-  const isCustomMatch = customHeader === cronSecret;
-
-  if (!isBearerMatch && !isCustomMatch) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  try {
-    const result = await expireOutdatedReservations();
-    return NextResponse.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Error expiring stock reservations:', err);
-    return NextResponse.json(
-      { error: 'Failed to expire reservations', details: String(err) },
-      { status: 500 },
-    );
-  }
+/**
+ * GET /api/cron/expire-reservations
+ * Sweeps expired stock reservations and marks stale quotes as expired.
+ */
+export async function GET(req: NextRequest) {
+  return runCronJob('expire_reservations', req, async () => {
+    return await expireOutdatedReservations();
+  });
 }

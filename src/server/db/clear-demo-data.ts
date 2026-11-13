@@ -16,6 +16,7 @@
 import 'dotenv/config';
 import { Pool, neonConfig } from '@neondatabase/serverless';
 import ws from 'ws';
+import { assertNotProtectedDatabase } from '@/lib/protected-db';
 
 neonConfig.webSocketConstructor = ws;
 
@@ -24,6 +25,9 @@ if (!DATABASE_URL) {
   console.error('❌  DATABASE_URL is not set. Add it to your .env file.');
   process.exit(1);
 }
+
+// Enforce protected database guard
+assertNotProtectedDatabase(DATABASE_URL, 'clear-demo-data');
 
 // Ordered list of tables to wipe (children before parents, CASCADE enabled)
 const TRUNCATE_TABLES: string[] = [

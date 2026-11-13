@@ -8,9 +8,32 @@
  */
 import type { NextAuthConfig } from 'next-auth';
 
+const appEnv = (process.env.APP_ENV || 'local').toLowerCase();
+const isProd = appEnv === 'production';
+const isStaging = appEnv === 'staging';
+const useSecureCookies = isProd || isStaging;
+
+// Environment-differentiated session cookie name
+const cookiePrefix = useSecureCookies ? '__Secure-' : '';
+const sessionCookieName = `${cookiePrefix}ace.${appEnv}.session-token`;
+
 export const authConfig: NextAuthConfig = {
   secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
-  session: { strategy: 'jwt' },
+  session: {
+    strategy: 'jwt',
+    maxAge: 12 * 60 * 60, // 12 hours max session age
+  },
+  cookies: {
+    sessionToken: {
+      name: sessionCookieName,
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: useSecureCookies,
+      },
+    },
+  },
 
   pages: {
     signIn: '/login',
@@ -27,8 +50,6 @@ export const authConfig: NextAuthConfig = {
     /**
      * Middleware-safe authorized() callback.
      * Called on every request matched by the middleware.
-     * We do NOT hit the database here — that would be too slow and is not
-     * available on the Edge.  The JWT already carries what we need.
      */
     authorized({ auth, request }) {
       const { nextUrl } = request;
@@ -41,12 +62,28 @@ export const authConfig: NextAuthConfig = {
         nextUrl.pathname.startsWith('/brand') ||
         nextUrl.pathname === '/favicon.ico';
 
-      // Public payment link pages, payment link API, and provider webhooks — no auth required
-      const isPublicPayRoute = nextUrl.pathname.startsWith('/pay/');
-      const isPublicPayApi = nextUrl.pathname.startsWith('/api/pay/');
+      // 1. Health check endpoints (liveness and secret-protected DB check)
+      const isHealthRoute = nextUrl.pathname === '/api/health' || nextUrl.pathname.startsWith('/api/health/');
+
+      // 2. Cron jobs (protected by Bearer CRON_SECRET inside the route handler)
+      const isCronRoute = nextUrl.pathname.startsWith('/api/cron/');
+
+      // 3. Inbound webhooks (protected by cryptographic provider signatures inside route handler)
       const isWebhookRoute = nextUrl.pathname.startsWith('/api/webhooks/');
 
-      if (isPublicAsset || isApiAuthRoute || isPublicPayRoute || isPublicPayApi || isWebhookRoute) {
+      // 4. Public customer payment portal & payment link APIs
+      const isPublicPayRoute = nextUrl.pathname.startsWith('/pay/');
+      const isPublicPayApi = nextUrl.pathname.startsWith('/api/pay/');
+
+      if (
+        isPublicAsset ||
+        isHealthRoute ||
+        isCronRoute ||
+        isWebhookRoute ||
+        isPublicPayRoute ||
+        isPublicPayApi ||
+        isApiAuthRoute
+      ) {
         return true;
       }
 
@@ -73,7 +110,7 @@ export const authConfig: NextAuthConfig = {
     },
 
     session({ session, token }) {
-      if (token) {
+      if (session.user) {
         session.user.id = token.id as string;
         session.user.roleId = token.roleId as string;
         session.user.forcePasswordChange = token.forcePasswordChange as boolean;

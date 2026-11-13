@@ -6,7 +6,9 @@
 
 DO $$ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'ace_app_user') THEN
-    CREATE ROLE ace_app_user LOGIN PASSWORD 'AceApp2026Secure!';
+    -- Created without hardcoded password; owner sets password via:
+    -- ALTER ROLE ace_app_user WITH PASSWORD '<secret_from_env>';
+    CREATE ROLE ace_app_user LOGIN;
   END IF;
 END $$;
 

@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { neonConfig, Pool } from '@neondatabase/serverless';
 import ws from 'ws';
 import { hash, verify } from '@node-rs/argon2';
+import { assertNotProtectedDatabase } from '@/lib/protected-db';
 
 neonConfig.webSocketConstructor = ws;
 
@@ -10,6 +11,8 @@ async function main() {
   if (!databaseUrl) {
     throw new Error('DATABASE_URL is not set');
   }
+
+  assertNotProtectedDatabase(databaseUrl, 'reset-admin');
 
   const pool = new Pool({ connectionString: databaseUrl });
   const newPassword = process.env.ADMIN_SEED_PASSWORD || 'ChangeMe123!';

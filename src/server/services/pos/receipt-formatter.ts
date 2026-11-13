@@ -27,6 +27,7 @@ import {
 import { eq, and, inArray } from 'drizzle-orm';
 import { getAllSettings } from '@/server/services/settings';
 import { getEisReceiptData } from '@/server/services/integrations/eis/queue';
+import { isStaging } from '@/lib/env';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -356,6 +357,10 @@ export function renderReceiptHtml(data: ReceiptData): string {
     ? `<div class="reprint-banner">*** DUPLICATE REPRINT ***</div>`
     : '';
 
+  const stagingBanner = isStaging()
+    ? `<div class="staging-banner" style="color:#b91c1c;font-weight:bold;text-align:center;padding:4px;border:1px dashed #b91c1c;margin:4px 0;font-size:10px;">*** STAGING, TEST DATA, NOT A REAL TAX INVOICE ***</div>`
+    : '';
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -410,6 +415,7 @@ export function renderReceiptHtml(data: ReceiptData): string {
     ${data.companyPhone ? `<div>Tel: ${escapeHtml(data.companyPhone)}</div>` : ''}
     ${data.companyTpin ? `<div>TPIN: ${escapeHtml(data.companyTpin)}</div>` : ''}
     <div class="doc-type">${docLabel}</div>
+    ${stagingBanner}
     ${reprintBanner}
   </div>
   <hr>

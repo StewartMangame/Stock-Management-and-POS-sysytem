@@ -1,0 +1,34 @@
+version: '3.9'
+
+# Local Postgres for integration tests.
+# Two databases:
+#   - acetest          → shared test database (all integration tests)
+#   - acemigrationtest → throwaway database (migration reproducibility test only)
+#
+# Usage:
+#   docker compose up -d
+#   # wait for healthy, then run tests:
+#   npm test
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aceowner
+      POSTGRES_PASSWORD: aceowner
+      POSTGRES_DB: acetest
+    ports:
+      - '5433:5432'
+    volumes:
+      - ace_pg_data:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U aceowner -d acetest']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ace_pg_data:
+

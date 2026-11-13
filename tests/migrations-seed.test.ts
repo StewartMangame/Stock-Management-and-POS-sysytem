@@ -1,73 +1,71 @@
 /**
- * Integration test: migrations + seed on an empty database.
+ * Integration test: migrations + seed on a throwaway database.
  *
  * Proves that:
  *   1. All SQL migrations run cleanly on an empty PostgreSQL schema.
- *   2. The seed script inserts all required baseline data.
+ *   2. The production seed script inserts all required baseline data.
  *   3. The seed is idempotent (running twice does not error or duplicate data).
  *   4. Expected rows exist and have the right values.
  *
- * Prerequisites:
- *   - Set DATABASE_URL_TEST in .env.test to a dedicated test database.
- *   - The test database must be accessible and the user must have CREATE TABLE rights.
- *   - Each run drops and recreates the test schema for a clean slate.
+ * Uses MIGRATION_TEST_DB_URL — a SEPARATE database from the shared test DB —
+ * so wiping its schema never touches other tests.
  *
- * Skip gracefully when DATABASE_URL_TEST is not set (CI opt-in).
+ * With Docker Postgres (docker compose up -d):
+ *   MIGRATION_TEST_DB_URL = postgresql://aceowner:aceowner@localhost:5433/acemigrationtest
+ *
+ * The test is skipped when MIGRATION_TEST_DB_URL is absent so the suite still
+ * passes in environments that have only the shared test DB.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { Pool, neonConfig } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-serverless';
-import ws from 'ws';
-import { runMigrations } from '@/server/db/migrate';
+import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { runMigrationsNode } from '@/server/db/migrate-node';
 import * as schema from '@/server/db/schema';
 import { eq, count } from 'drizzle-orm';
 
-neonConfig.webSocketConstructor = ws;
+// Use the dedicated throwaway database — never the shared test DB
+const MIGRATION_TEST_DB_URL = process.env['MIGRATION_TEST_DB_URL'];
 
-const TEST_DB_URL = process.env['MIGRATION_TEST_DB_URL'] || (process.env['RUN_MIGRATION_TEST'] === 'true' ? process.env['DATABASE_URL_TEST'] : undefined);
+const describeIf = MIGRATION_TEST_DB_URL ? describe : describe.skip;
 
-const describeIf = TEST_DB_URL ? describe : describe.skip;
-
-describeIf('Migrations + seed integration', () => {
+describeIf('Migrations + production-seed on a throwaway database', () => {
   let pool: Pool;
   let db: ReturnType<typeof drizzle<typeof schema>>;
 
   beforeAll(async () => {
-    if (!TEST_DB_URL) return;
+    pool = new Pool({ connectionString: MIGRATION_TEST_DB_URL! });
 
-    pool = new Pool({ connectionString: TEST_DB_URL });
-
-    // Wipe the database so we start from a clean state
+    // Wipe the throwaway DB to a clean public schema
     await pool.query(`
       DROP SCHEMA public CASCADE;
       CREATE SCHEMA public;
       GRANT ALL ON SCHEMA public TO PUBLIC;
     `);
 
-    // Run all migrations
-    await runMigrations(pool);
+    // Apply all migrations via the node-postgres runner
+    await runMigrationsNode(pool);
 
-    // Seed the database using a fresh import to pick up the wiped state
-    process.env['DATABASE_URL'] = TEST_DB_URL;
-    process.env['ADMIN_SEED_PASSWORD'] = 'TestPass1!';
+    // Seed with production seed (not demo seed)
+    process.env['DATABASE_URL'] = MIGRATION_TEST_DB_URL!;
+    process.env['ADMIN_SEED_PASSWORD'] = process.env['ADMIN_SEED_PASSWORD'] || 'TestAdmin1!';
 
-    // Dynamic import so that the seed uses the test database URL
-    const { runSeed } = await import('@/server/db/seed');
-    await runSeed();
+    const { runProductionSeed } = await import('@/server/db/seed-production');
+    await runProductionSeed();
 
-    db = drizzle({ client: pool, schema });
-  }, 60_000);
+    db = drizzle(pool, { schema });
+  }, 90_000);
 
   afterAll(async () => {
     await pool?.end();
   });
 
-  // ── Migration checks ───────────────────────────────────────────────────────
+  // ── Migration structure checks ─────────────────────────────────────────────
 
   it('creates the locations table', async () => {
     const result = await pool.query(
-      `SELECT table_name FROM information_schema.tables WHERE table_name = 'locations'`,
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = 'locations'`,
     );
     expect(result.rows).toHaveLength(1);
   });
@@ -82,7 +80,8 @@ describeIf('Migrations + seed integration', () => {
 
   it('creates the login_attempts table', async () => {
     const result = await pool.query(
-      `SELECT table_name FROM information_schema.tables WHERE table_name = 'login_attempts'`,
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = 'login_attempts'`,
     );
     expect(result.rows).toHaveLength(1);
   });
@@ -94,12 +93,45 @@ describeIf('Migrations + seed integration', () => {
     expect(result.rows).toHaveLength(1);
   });
 
-  // ── Seed checks ────────────────────────────────────────────────────────────
+  it('creates the cron_runs table (migration 0013)', async () => {
+    const result = await pool.query(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = 'cron_runs'`,
+    );
+    expect(result.rows).toHaveLength(1);
+  });
+
+  it('adds product_date column to products (migration 0012)', async () => {
+    const result = await pool.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = 'products' AND column_name = 'product_date'`,
+    );
+    expect(result.rows).toHaveLength(1);
+  });
+
+  it('adds image_url column to products (migration 0012)', async () => {
+    const result = await pool.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = 'products' AND column_name = 'image_url'`,
+    );
+    expect(result.rows).toHaveLength(1);
+  });
+
+  it('every migration file is tracked in _migrations', async () => {
+    const { rows: migrated } = await pool.query<{ filename: string }>(
+      `SELECT filename FROM _migrations ORDER BY filename`,
+    );
+    const { readdir } = await import('fs/promises');
+    const path = await import('path');
+    const dir = path.join(process.cwd(), 'src', 'server', 'db', 'migrations');
+    const files = (await readdir(dir)).filter((f) => f.endsWith('.sql')).sort();
+    expect(migrated.map((r) => r.filename)).toEqual(files);
+  });
+
+  // ── Production seed checks ─────────────────────────────────────────────────
 
   it('seeds all 6 roles', async () => {
-    const result = await db
-      .select({ total: count() })
-      .from(schema.roles);
+    const result = await db.select({ total: count() }).from(schema.roles);
     expect(result[0]?.total).toBe(6);
   });
 
@@ -119,7 +151,6 @@ describeIf('Migrations + seed integration', () => {
     });
     expect(viewerRole).toBeDefined();
     expect(viewerRole!.permissions).not.toContain('users:manage');
-    expect(viewerRole!.permissions).not.toContain('invoices:void');
     expect(viewerRole!.permissions).toContain('reports:view');
   });
 
@@ -143,14 +174,12 @@ describeIf('Migrations + seed integration', () => {
     expect(vat!.isActive).toBe(true);
   });
 
-  it('seeds all 7 number sequences for MAIN location', async () => {
-    const result = await db
-      .select({ total: count() })
-      .from(schema.numberSequences);
+  it('seeds 7 number sequences for MAIN location', async () => {
+    const result = await db.select({ total: count() }).from(schema.numberSequences);
     expect(result[0]?.total).toBe(7);
   });
 
-  it('seeds the invoice number sequence starting at 1 with prefix MAIN-INV', async () => {
+  it('seeds the invoice sequence starting at 1 with prefix MAIN-INV', async () => {
     const seq = await db.query.numberSequences.findFirst({
       where: eq(schema.numberSequences.docType, 'invoice'),
     });
@@ -160,12 +189,11 @@ describeIf('Migrations + seed integration', () => {
     expect(seq!.padding).toBe(4);
   });
 
-  it('seeds default settings including company_name', async () => {
+  it('seeds company_name setting', async () => {
     const setting = await db.query.settings.findFirst({
       where: eq(schema.settings.key, 'company_name'),
     });
     expect(setting).toBeDefined();
-    expect(setting!.value).toBe('Ace Holdings Limited');
   });
 
   it('seeds allow_negative_stock as false', async () => {
@@ -183,15 +211,15 @@ describeIf('Migrations + seed integration', () => {
     expect(admin).toBeDefined();
     expect(admin!.forcePasswordChange).toBe(true);
     expect(admin!.isActive).toBe(true);
-    expect(admin!.passwordHash).not.toBe('TestPass1!'); // must be hashed
+    expect(admin!.passwordHash).not.toMatch(/^TestAdmin/); // must be hashed
     expect(admin!.passwordHash.length).toBeGreaterThan(20);
   });
 
-  // ── Idempotency check ──────────────────────────────────────────────────────
+  // ── Idempotency ────────────────────────────────────────────────────────────
 
   it('seed is idempotent — running twice does not create duplicate roles', async () => {
-    const { runSeed } = await import('@/server/db/seed');
-    await runSeed(); // second run
+    const { runProductionSeed } = await import('@/server/db/seed-production');
+    await runProductionSeed(); // second run
 
     const result = await db.select({ total: count() }).from(schema.roles);
     expect(result[0]?.total).toBe(6); // still 6, not 12

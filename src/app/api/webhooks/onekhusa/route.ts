@@ -2,19 +2,28 @@
  * OneKhusa Webhook Ingestion API Route.
  *
  * Verifies HMAC-SHA512 signature on raw payload, deduplicates via webhook_inbox,
- * returns 200 OK instantly, and delegates asynchronous processing.
+ * returns 200 OK instantly, and delegates asynchronous processing via after().
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { db } from '@/server/db';
 import { webhookInbox } from '@/server/db/schema';
 import { getPaymentProvider } from '@/server/services/integrations/onekhusa';
 import { processWebhookInboxItem } from '@/server/services/integrations/webhook-processor';
+import { checkDbRateLimit } from '@/server/services/rate-limit';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
+    // 0. DB-backed rate limit check on caller IP
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown_ip';
+    const rateCheck = await checkDbRateLimit(`webhook_ip:${ip}`, 120, 60);
+    if (!rateCheck.allowed) {
+      return NextResponse.json({ error: 'Too Many Requests' }, { status: 429 });
+    }
+
     const rawPayload = await req.text();
 
     // Collect headers
@@ -56,18 +65,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: 'already_received' }, { status: 200 });
     }
 
-    // 4. Return 200 OK immediately and process asynchronously
-    const response = NextResponse.json({ status: 'acknowledged' }, { status: 200 });
-
-    // Process using microtask/async without blocking HTTP response
-    processWebhookInboxItem(inserted.id).catch((err) => {
-      console.error('[OneKhusa Webhook] Async processor error:', err);
+    // 4. Return 200 OK immediately and execute processing using Next.js after()
+    after(async () => {
+      try {
+        await processWebhookInboxItem(inserted.id);
+      } catch (err) {
+        console.error('[OneKhusa Webhook] after() processing error:', err);
+      }
     });
 
-    return response;
+    return NextResponse.json({ status: 'acknowledged' }, { status: 200 });
   } catch (err: any) {
     console.error('[OneKhusa Webhook] Fatal error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-

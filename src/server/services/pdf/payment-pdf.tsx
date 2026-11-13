@@ -12,6 +12,7 @@ import { getAllSettings } from '@/server/services/settings';
 import { formatTambala } from '@/lib/money';
 import { getCustomerStatement } from '@/server/services/reports/customer-statement';
 import { getAgedDebtors } from '@/server/services/reports/aged-debtors';
+import { isStaging } from '@/lib/env';
 
 const styles = StyleSheet.create({
   page: {
@@ -196,6 +197,13 @@ export function PaymentReceiptDocument({
   return (
     <Document>
       <Page size="A4" style={styles.page}>
+        {isStaging() && (
+          <View style={{ backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#ef4444', padding: 4, marginBottom: 8, alignItems: 'center' }}>
+            <Text style={{ color: '#b91c1c', fontSize: 9.5, fontWeight: 'bold' }}>
+              STAGING, TEST DATA, NOT A REAL TAX INVOICE
+            </Text>
+          </View>
+        )}
         {isReversed && <Text style={styles.watermark}>REVERSED</Text>}
         {isPending && <Text style={styles.watermarkPending}>PENDING</Text>}
         {isFailed && <Text style={styles.watermark}>FAILED</Text>}
@@ -366,6 +374,13 @@ export function CustomerStatementDocument({
   return (
     <Document>
       <Page size="A4" style={styles.page}>
+        {isStaging() && (
+          <View style={{ backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#ef4444', padding: 4, marginBottom: 8, alignItems: 'center' }}>
+            <Text style={{ color: '#b91c1c', fontSize: 9.5, fontWeight: 'bold' }}>
+              STAGING, TEST DATA, NOT A REAL TAX INVOICE
+            </Text>
+          </View>
+        )}
         {/* Header */}
         <View style={styles.headerBand}>
           <View>
@@ -471,6 +486,13 @@ export function AgedDebtorsDocument({
   return (
     <Document>
       <Page size="A4" orientation="landscape" style={styles.page}>
+        {isStaging() && (
+          <View style={{ backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#ef4444', padding: 4, marginBottom: 8, alignItems: 'center' }}>
+            <Text style={{ color: '#b91c1c', fontSize: 9.5, fontWeight: 'bold' }}>
+              STAGING, TEST DATA, NOT A REAL TAX INVOICE
+            </Text>
+          </View>
+        )}
         {/* Header */}
         <View style={styles.headerBand}>
           <View>

@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import { Toaster } from '@/components/ui/sonner';
 import { Providers } from '@/components/providers';
+import { isStaging } from '@/lib/env';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -21,9 +22,19 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const showStagingBanner = isStaging();
+
   return (
     <html lang="en" className={inter.variable}>
       <body>
+        {showStagingBanner && (
+          <div
+            id="staging-banner"
+            className="w-full bg-amber-400 text-amber-950 py-1.5 px-4 text-center text-xs font-black uppercase tracking-wider border-b border-amber-500 sticky top-0 z-50 shadow-sm"
+          >
+            ⚠️ STAGING ENVIRONMENT — TEST DATA ONLY — NOT A REAL SYSTEM
+          </div>
+        )}
         <Providers>
           {children}
         </Providers>

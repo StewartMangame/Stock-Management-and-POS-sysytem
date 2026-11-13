@@ -244,7 +244,7 @@ describe('Journal tables immutability: INSERT-only', () => {
 
     if (count > 0) {
       await expect(
-        db.execute(sql`UPDATE journal_batches SET notes = 'tampered' WHERE 1=1`)
+        db.execute(sql`UPDATE journal_batches SET total_debit_minor = 999999 WHERE 1=1`)
       ).rejects.toThrow();
     } else {
       // No rows to update — verify trigger exists

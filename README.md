@@ -10,7 +10,8 @@ Stock management, sales and point-of-sale system for **Ace Holdings Limited**, B
 |---|---|
 | Node.js | 20 LTS or later |
 | npm | 10 or later |
-| PostgreSQL | 15 or later (Neon recommended) |
+| Docker Desktop | 24 or later (for local integration tests) |
+| PostgreSQL | 15 or later (Neon recommended for dev/prod; Docker for tests) |
 
 ---
 
@@ -43,10 +44,11 @@ ADMIN_SEED_PASSWORD=<a strong password for the first admin>
 ### 3. Run database migrations
 
 ```bash
+export MIGRATION_DATABASE_URL=postgresql://owner:pass@host/dbname?sslmode=require
 npm run db:migrate
 ```
 
-This applies all SQL files in `src/server/db/migrations/` in order.  
+This applies all SQL files in `src/server/db/migrations/` in order.
 Re-running is safe — already-applied migrations are skipped.
 
 ### 4. Seed the database
@@ -71,8 +73,52 @@ The seed script is **idempotent** — running it multiple times is safe.
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).  
+Open [http://localhost:3000](http://localhost:3000).
 Log in with `admin@ace.co.mw` and the password set in `ADMIN_SEED_PASSWORD`.
+
+---
+
+## Running integration tests (Docker Postgres)
+
+The test suite runs against a **local Docker Postgres instance** so tests are fast and
+isolated — no network calls to Neon or any remote service.
+
+### Step 1 — Start Docker Postgres
+
+```bash
+docker compose up -d
+# Wait for the healthcheck to pass (~10 s):
+docker compose ps
+```
+
+This starts Postgres 16 on port **5433** with two databases:
+- `acetest` — shared integration test database (all test files)
+- `acemigrationtest` — throwaway database (schema-reproducibility test only)
+
+### Step 2 — Create `.env.test`
+
+```bash
+cp .env.test.example .env.test
+```
+
+The example already contains the correct Docker connection strings.
+If you use Neon for tests instead, replace the URLs with your Neon strings.
+
+### Step 3 — Run the suite
+
+```bash
+npm test
+```
+
+Before Vitest starts, the `pretest` script automatically migrates the test database
+so you never need to migrate manually between code changes.
+
+### Stopping the container
+
+```bash
+docker compose down          # stop, keep the data volume
+docker compose down -v       # stop and wipe all data (clean slate)
+```
 
 ---
 
@@ -84,29 +130,17 @@ Log in with `admin@ace.co.mw` and the password set in `ADMIN_SEED_PASSWORD`.
 | `npm run build` | Build production bundle |
 | `npm run lint` | Run ESLint |
 | `npm run typecheck` | TypeScript type check (no emit) |
+| `npm run audit:check` | Fail on HIGH+ npm vulnerabilities (quality gate) |
+| `npm run quality:check` | Run typecheck + lint + audit + build |
 | `npm run db:generate` | Generate Drizzle SQL migrations from schema |
-| `npm run db:migrate` | Apply pending migrations |
+| `npm run db:migrate` | Apply pending migrations (requires MIGRATION_DATABASE_URL) |
 | `npm run db:seed` | Seed baseline data (idempotent) |
+| `npm run seed:production` | Idempotent production seed (roles, admin, VAT, sequences) |
 | `npm run db:studio` | Open Drizzle Studio (DB browser) |
-| `npm test` | Run unit tests (Vitest) |
+| `npm test` | Run unit + integration tests (Vitest), auto-migrates test DB first |
 | `npm run test:watch` | Vitest watch mode |
+| `npm run secret-scan` | Scan git history for accidentally committed secrets |
 | `npm run format` | Format all files with Prettier |
-
----
-
-## Running integration tests
-
-Integration tests (migration + seed) require a **separate test database** to avoid touching production data.
-
-```bash
-# Create a .env.test file
-echo 'DATABASE_URL_TEST=postgresql://user:password@host/testdb?sslmode=require' > .env.test
-echo 'ADMIN_SEED_PASSWORD=TestPass1!' >> .env.test
-
-npm test
-```
-
-Tests that require `DATABASE_URL_TEST` are skipped automatically when the variable is not set.
 
 ---
 
@@ -130,10 +164,22 @@ src/
   lib/               money.ts, validation.ts, permissions.ts, utils.ts
   types/             next-auth.d.ts type augmentation
 tests/
-  authorize.test.ts       Permission matrix tests
-  money.test.ts           Money arithmetic tests
-  settings.test.ts        Settings service tests
-  migrations-seed.test.ts Integration: clean DB → migrate → seed
+  authorize.test.ts              Permission matrix tests
+  money.test.ts                  Money arithmetic tests
+  settings.test.ts               Settings service tests
+  migrations-seed.test.ts        Schema reproducibility: empty DB → migrate → seed
+  deployment-readiness.test.ts   Deployment safety guards
+  runtime-role.test.ts           Runtime role privilege tests
+  phase1-stock.test.ts           Inventory integration tests
+  phase2-sales.test.ts           Sales / documents integration tests
+  phase3-payments.test.ts        Payments, allocations, AR tests
+  phase4-pos.test.ts             Counter POS and shift tests
+  ...
+docker/
+  postgres-init.sql              Container init SQL (creates acemigrationtest DB)
+docker-compose.yml               Local Postgres for tests
+docs/
+  DEPLOYMENT.md                  Production deployment guide
 ```
 
 ---
@@ -152,23 +198,25 @@ Migrations live in `src/server/db/migrations/` as plain SQL files, named `NNNN_d
 
 - Passwords are hashed with **argon2** (`@node-rs/argon2`, 64 MiB memory cost).
 - Sessions are JWT-based (Auth.js v5, credentials provider). The `AUTH_SECRET` must be a strong random value.
-- Login is rate-limited to **5 failed attempts per IP per 15 minutes** (stored in `login_attempts` table).
+- Login is rate-limited to **5 failed attempts per IP per 15 minutes** (stored in `login_attempts` table, database-backed).
 - Every sensitive server action calls `authorize()` which **re-reads the user's role from the database** — role changes take effect without a re-login.
 - Card numbers are never stored. Only the approval code and terminal reference are kept.
 - Provider secrets (OneKhusa, EIS) are server-only environment variables — never exposed to the browser.
+- The runtime role `ace_app_user` cannot UPDATE/DELETE audit logs or accounting journals.
 
 ---
 
 ## Database backup
 
-Neon provides automated daily backups. For a self-hosted PostgreSQL, add this to cron:
+See `docs/DEPLOYMENT.md` for the full backup and restore procedure.
+
+Neon provides point-in-time recovery. Run a weekly `pg_dump` stored outside Neon:
 
 ```bash
-# Daily backup at 02:00
-0 2 * * * pg_dump $DATABASE_URL | gzip > /backups/ace_pos_$(date +\%Y\%m\%d).sql.gz
+pg_dump "$MIGRATION_DATABASE_URL" \
+  --format=custom \
+  --file="ace_backup_$(date +%Y%m%d).dump"
 ```
-
-Keep at least 30 days of backups. Test restores quarterly.
 
 ---
 
@@ -177,17 +225,17 @@ Keep at least 30 days of backups. Test restores quarterly.
 | Phase | Status | Scope |
 |---|---|---|
 | **0** | ✅ Complete | Project setup, auth, roles, layout, settings, seed |
-| 1 | Pending | Products, stock ledger, purchasing, goods received |
-| 2 | Pending | Customers, quotations, invoices, delivery notes, PDFs |
-| 3 | Pending | Payments, allocations, aged debtors |
-| 4 | Pending | Counter POS, shifts, cash-up |
-| 5 | Pending | OneKhusa, EIS, card reconciliation |
-| 6 | Pending | Reports, dashboard data |
-| 7 | Pending | Offline PWA, multi-location transfers |
+| 1 | ✅ Complete | Products, stock ledger, purchasing, goods received |
+| 2 | ✅ Complete | Customers, quotations, invoices, delivery notes, PDFs |
+| 3 | ✅ Complete | Payments, allocations, aged debtors |
+| 4 | ✅ Complete | Counter POS, shifts, cash-up |
+| 5 | ✅ Complete | OneKhusa, EIS, card reconciliation |
+| 6 | ✅ Complete | Reports, dashboard data |
+| 7 | 🚧 In progress | Deployment readiness, security hardening |
 
 ---
 
 ## Logo
 
-Place the Ace Holdings logo at `/public/brand/ace-logo.png`.  
+Place the Ace Holdings logo at `/public/brand/ace-logo.png`.
 Until it is supplied, the sidebar and login page show a navy "A" placeholder.

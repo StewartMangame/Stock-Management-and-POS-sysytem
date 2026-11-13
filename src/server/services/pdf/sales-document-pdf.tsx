@@ -39,6 +39,7 @@ import {
 import { eq, inArray } from 'drizzle-orm';
 import { getAllSettings } from '@/server/services/settings';
 import { ACE_LOGO_DATA_URI } from './assets';
+import { isStaging } from '@/lib/env';
 
 const styles = StyleSheet.create({
   page: {
@@ -528,6 +529,14 @@ export const SalesDocumentPdf: React.FC<{ data: SalesDocumentPdfData }> = ({ dat
       <Page size="A4" style={styles.page}>
         {/* Subtle Ace Holdings Logo Background Watermark */}
         <Image src={ACE_LOGO_DATA_URI} style={styles.backgroundWatermark} />
+
+        {isStaging() && (
+          <View style={{ backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#ef4444', padding: 5, marginBottom: 8, alignItems: 'center' }}>
+            <Text style={{ color: '#b91c1c', fontSize: 9.5, fontWeight: 'bold' }}>
+              STAGING, TEST DATA, NOT A REAL TAX INVOICE
+            </Text>
+          </View>
+        )}
 
         {/* Status Watermarks */}
         {isDraft && <Text style={styles.draftWatermark}>DRAFT</Text>}

@@ -6,6 +6,9 @@ import type { ReportUser } from '@/lib/report-framework';
 import { writeAuditLog } from '@/server/services/audit';
 import { db } from '@/server/db';
 
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
 // ── Report data imports ───────────────────────────────────────────────────────
 import { getSalesByItem, getSalesByCustomer, getSalesByDay, getSalesByPaymentMethod } from '@/server/services/reports/sales-report';
 import { getProfitByItem } from '@/server/services/reports/profit-report';
@@ -48,7 +51,9 @@ export async function GET(
     const url = new URL(req.url);
     const format = url.searchParams.get('format') || 'json'; // 'json' | 'csv'
 
-    const requiredPerm = REPORT_PERMISSIONS[report];
+    const requiredPerm = Object.prototype.hasOwnProperty.call(REPORT_PERMISSIONS, report)
+      ? REPORT_PERMISSIONS[report]
+      : undefined;
     if (!requiredPerm) {
       return NextResponse.json({ error: 'Unknown report' }, { status: 404 });
     }

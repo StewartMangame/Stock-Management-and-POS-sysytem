@@ -11,6 +11,9 @@ import {
   generateAgedDebtorsPdfBuffer,
 } from '@/server/services/pdf/payment-pdf';
 
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ type: string; id: string }> },

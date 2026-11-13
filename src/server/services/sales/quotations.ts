@@ -77,8 +77,12 @@ export async function createQuotation(input: CreateQuotationInput, userId?: stri
 
   // 3. Fetch tax rates used
   const taxRateIds = Array.from(
-    new Set(input.lines.map((l) => l.taxRateId || defaultTaxRate.id)),
-  );
+    new Set(
+      input.lines
+        .map((l) => l.taxRateId || productMap.get(l.productId)?.taxRateId || defaultTaxRate.id)
+        .filter(Boolean),
+    ),
+  ) as string[];
   const fetchedTaxRates = await db
     .select()
     .from(taxRates)

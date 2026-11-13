@@ -16,7 +16,7 @@ const pool = new Pool({ connectionString: url });
 async function main() {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN; SET TRANSACTION READ ONLY;');
+    await client.query('BEGIN; SET LOCAL TRANSACTION READ ONLY;');
 
     // 1. Full tax_rates table
     const { rows: rates } = await client.query(`

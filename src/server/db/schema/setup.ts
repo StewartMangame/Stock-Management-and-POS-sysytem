@@ -242,6 +242,27 @@ export const loginAttempts = pgTable(
   ],
 );
 
+// ── Cron Runs Heartbeat Table ──────────────────────────────────────────────────
+
+export const cronRuns = pgTable(
+  'cron_runs',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    jobName: text('job_name').notNull(),
+    status: text('status').notNull(), // 'started' | 'completed' | 'failed'
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    durationMs: integer('duration_ms'),
+    errorMessage: text('error_message'),
+    metadata: jsonb('metadata'),
+  },
+  (t) => [
+    index('cron_runs_job_name_idx').on(t.jobName),
+    index('cron_runs_started_at_idx').on(t.startedAt),
+    index('cron_runs_job_status_idx').on(t.jobName, t.status, t.completedAt),
+  ],
+);
+
 // ── Relations ─────────────────────────────────────────────────────────────────
 
 export const rolesRelations = relations(roles, ({ many }) => ({

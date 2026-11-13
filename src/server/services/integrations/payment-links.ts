@@ -17,6 +17,7 @@ import { eq, and, sql, gte } from 'drizzle-orm';
 import { getPaymentProvider, normalizeMalawianPhone } from './onekhusa';
 import { nextSequenceNumber } from '@/server/services/sequences';
 import { todayInCompanyTz, getNow } from '@/lib/timezone';
+import { checkDbRateLimit } from '@/server/services/rate-limit';
 
 export interface CreatePaymentLinkOptions {
   allowPartial?: boolean;
@@ -159,25 +160,8 @@ export async function getPaymentLinkPublicData(rawToken: string) {
  * Max 5 requests per key per 10-minute window.
  */
 async function checkRateLimit(key: string, limit = 5, windowMs = 10 * 60 * 1000): Promise<boolean> {
-  const now = new Date();
-  const windowStart = new Date(Math.floor(now.getTime() / windowMs) * windowMs);
-
-  const [row] = await db
-    .insert(paymentLinkRateLimits)
-    .values({
-      key,
-      windowStart,
-      requestCount: 1,
-    })
-    .onConflictDoUpdate({
-      target: [paymentLinkRateLimits.key, paymentLinkRateLimits.windowStart],
-      set: {
-        requestCount: sql`${paymentLinkRateLimits.requestCount} + 1`,
-      },
-    })
-    .returning();
-
-  return (row?.requestCount ?? 1) <= limit;
+  const { allowed } = await checkDbRateLimit(key, limit, Math.floor(windowMs / 1000));
+  return allowed;
 }
 
 /**

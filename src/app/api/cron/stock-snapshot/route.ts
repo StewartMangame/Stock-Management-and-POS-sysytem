@@ -1,20 +1,16 @@
-import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { runCronJob } from '@/server/services/cron-helper';
 import { runSnapshotCron } from '@/server/services/stock/snapshot-cron';
 
-export async function GET(req: Request) {
-  // Verify cron secret to prevent public triggering
-  const authHeader = req.headers.get('authorization');
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  try {
-    const result = await runSnapshotCron();
-    return NextResponse.json({ ok: true, ...result });
-  } catch (err) {
-    console.error('[cron:stock-snapshot] error:', err);
-    return NextResponse.json({ error: 'Snapshot cron failed', detail: String(err) }, { status: 500 });
-  }
+/**
+ * GET /api/cron/stock-snapshot
+ * Takes daily stock snapshots at 22:00 UTC (midnight Blantyre).
+ */
+export async function GET(req: NextRequest) {
+  return runCronJob('stock_snapshot', req, async () => {
+    return await runSnapshotCron();
+  });
 }
-

@@ -5,6 +5,7 @@
 import { PaymentProvider } from './types';
 import { OneKhusaClient } from './client';
 import { MockPaymentProvider } from './mock';
+import { assertMocksAllowed, isProduction } from '@/lib/env';
 
 export * from './types';
 export * from './client';
@@ -17,9 +18,11 @@ export function getPaymentProvider(): PaymentProvider {
     return activeProvider;
   }
 
-  const providerType = process.env.PAYMENT_PROVIDER || (process.env.ONEKHUSA_API_KEY ? 'onekhusa' : 'mock');
+  const mode = (process.env.ONEKHUSA_MODE || process.env.PAYMENT_PROVIDER || (process.env.ONEKHUSA_API_KEY ? 'live' : 'mock')).toLowerCase();
+  const isMock = mode === 'mock';
 
-  if (providerType === 'mock') {
+  if (isMock) {
+    assertMocksAllowed('OneKhusa Payment Gateway');
     activeProvider = new MockPaymentProvider();
   } else {
     activeProvider = new OneKhusaClient();

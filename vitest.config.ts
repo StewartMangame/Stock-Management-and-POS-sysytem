@@ -7,9 +7,14 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
+    // APP_ENV=test is set here so env.ts validation passes and mocks are allowed
+    env: {
+      APP_ENV: 'test',
+    },
     setupFiles: ['./tests/setup.ts'],
-    testTimeout: 120000,
-    hookTimeout: 120000,
+    // 60 s is generous for local Docker Postgres; remove the 180 s Neon workaround
+    testTimeout: 60000,
+    hookTimeout: 60000,
     fileParallelism: false,
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     coverage: {

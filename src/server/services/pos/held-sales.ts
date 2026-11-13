@@ -17,7 +17,7 @@ import {
   customers,
   taxRates,
 } from '@/server/db/schema';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, lt } from 'drizzle-orm';
 import { writeAuditLog } from '@/server/services/audit';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -285,4 +285,17 @@ export async function discardHeldSale(heldSaleId: string, userId?: string): Prom
       after: { holdReference: held.holdReference },
     });
   }
+}
+
+/**
+ * Purges held sales older than the retention window (default 24 hours).
+ */
+export async function cleanupOldHeldSales(maxAgeHours = 24): Promise<{ purgedCount: number }> {
+  const threshold = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+  const deleted = await db
+    .delete(heldSales)
+    .where(lt(heldSales.heldAt, threshold))
+    .returning({ id: heldSales.id });
+
+  return { purgedCount: deleted.length };
 }

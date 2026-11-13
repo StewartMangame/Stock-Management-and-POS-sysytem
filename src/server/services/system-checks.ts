@@ -12,9 +12,8 @@
  */
 
 import { db } from '@/server/db';
-import { sql } from 'drizzle-orm';
-import { systemChecksHistory } from '@/server/db/schema';
-import { desc } from 'drizzle-orm';
+import { sql, eq, desc } from 'drizzle-orm';
+import { systemChecksHistory, cronRuns } from '@/server/db/schema';
 
 export interface CheckItemResult {
   code: string;
@@ -621,6 +620,62 @@ export async function runSystemChecks(executedById?: string): Promise<SystemChec
       name: 'Product Average Cost vs Ledger Replay',
       status: 'fail',
       summary: `Check failed to execute: ${err.message}`,
+      discrepancyCount: 1,
+    });
+  }
+
+  // ── Check: Workers Alive (Cron Heartbeat) ──────────────────────────────────
+  try {
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+    const criticalJobs = ['provider_reconciliation', 'eis_worker'];
+    const staleWorkers: string[] = [];
+
+    for (const job of criticalJobs) {
+      const [latest] = await db
+        .select({
+          jobName: cronRuns.jobName,
+          status: cronRuns.status,
+          completedAt: cronRuns.completedAt,
+          startedAt: cronRuns.startedAt,
+        })
+        .from(cronRuns)
+        .where(eq(cronRuns.jobName, job))
+        .orderBy(desc(cronRuns.startedAt))
+        .limit(1);
+
+      if (
+        !latest ||
+        (latest.completedAt && latest.completedAt < fifteenMinutesAgo) ||
+        (!latest.completedAt && latest.startedAt < fifteenMinutesAgo)
+      ) {
+        staleWorkers.push(job);
+      }
+    }
+
+    if (staleWorkers.length === 0) {
+      checks.push({
+        code: 'workers_alive',
+        name: 'Background Workers Alive Check',
+        status: 'pass',
+        summary: 'All critical cron workers (provider reconciliation & EIS) have completed a run within the last 15 minutes.',
+        discrepancyCount: 0,
+      });
+    } else {
+      checks.push({
+        code: 'workers_alive',
+        name: 'Background Workers Alive Check',
+        status: 'warning',
+        summary: `One or more background workers have not completed a heartbeat within the last 15 minutes: ${staleWorkers.join(', ')}.`,
+        discrepancyCount: staleWorkers.length,
+        details: staleWorkers.map((job) => ({ job, alert: 'No heartbeat within 15 minutes' })),
+      });
+    }
+  } catch (err: any) {
+    checks.push({
+      code: 'workers_alive',
+      name: 'Background Workers Alive Check',
+      status: 'warning',
+      summary: `Failed to inspect cron worker heartbeats: ${err?.message || err}`,
       discrepancyCount: 1,
     });
   }

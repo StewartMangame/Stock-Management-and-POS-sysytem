@@ -1,25 +1,20 @@
 /**
- * DB-backed login rate limiter.
+ * Database-backed rate limiters for stateless serverless environments.
  *
- * Limits: 5 failed attempts per IP within a 15-minute sliding window.
- * Successful logins do not count against the limit.
- *
- * Why DB-backed?  Vercel serverless functions are stateless, so in-memory
- * counters are lost between requests.  The login_attempts table is lightweight
- * and rows are purged by the cleanup job (or manually with: DELETE FROM
- * login_attempts WHERE at < NOW() - INTERVAL '1 day').
+ * Implements:
+ *   1. DB-backed login rate limiter (5 failed attempts per IP per 15 minutes) using login_attempts.
+ *   2. General DB-backed rate limiter using payment_link_rate_limits table (sliding bucket per key).
  */
 
 import { db } from '@/server/db';
-import { loginAttempts } from '@/server/db/schema';
+import { loginAttempts, paymentLinkRateLimits } from '@/server/db/schema';
 import { and, eq, gte, sql } from 'drizzle-orm';
 
 const MAX_FAILED_ATTEMPTS = 5;
 const WINDOW_MINUTES = 15;
 
 /**
- * Returns true if the IP has exceeded the rate limit (should block the attempt).
- * Logs the blocked attempt for audit purposes.
+ * Returns true if the IP has exceeded the login rate limit (should block the attempt).
  */
 export async function checkLoginRateLimit(ip: string, email: string): Promise<boolean> {
   const windowStart = new Date(Date.now() - WINDOW_MINUTES * 60 * 1_000);
@@ -40,7 +35,6 @@ export async function checkLoginRateLimit(ip: string, email: string): Promise<bo
 
 /**
  * Records a login attempt in the audit table.
- * Called after every authorize check regardless of outcome.
  */
 export async function recordLoginAttempt(
   ip: string,
@@ -48,4 +42,45 @@ export async function recordLoginAttempt(
   success: boolean,
 ): Promise<void> {
   await db.insert(loginAttempts).values({ ip, email: email.toLowerCase(), success });
+}
+
+/**
+ * General persistent database-backed rate limiter for public endpoints (payment links, webhooks, APIs).
+ * Uses PostgreSQL ON CONFLICT DO UPDATE atomic increment.
+ *
+ * @param key Unique rate limiting key (e.g. `pay_ip:${ip}`, `webhook:${ip}`)
+ * @param limit Maximum allowed requests within the time window
+ * @param windowSeconds Duration of the rate limit bucket window in seconds
+ */
+export async function checkDbRateLimit(
+  key: string,
+  limit = 60,
+  windowSeconds = 60,
+): Promise<{ allowed: boolean; count: number; remaining: number }> {
+  // Strip null bytes to prevent PostgreSQL UTF-8 encoding rejection
+  const safeKey = key.replace(/\0/g, '');
+  const now = new Date();
+  const windowMs = windowSeconds * 1000;
+  const windowStart = new Date(Math.floor(now.getTime() / windowMs) * windowMs);
+
+  const [row] = await db
+    .insert(paymentLinkRateLimits)
+    .values({
+      key: safeKey,
+      windowStart,
+      requestCount: 1,
+    })
+    .onConflictDoUpdate({
+      target: [paymentLinkRateLimits.key, paymentLinkRateLimits.windowStart],
+      set: {
+        requestCount: sql`${paymentLinkRateLimits.requestCount} + 1`,
+      },
+    })
+    .returning({ count: paymentLinkRateLimits.requestCount });
+
+  const currentCount = row?.count ?? 1;
+  const allowed = currentCount <= limit;
+  const remaining = Math.max(0, limit - currentCount);
+
+  return { allowed, count: currentCount, remaining };
 }
