@@ -26,11 +26,11 @@ export default async function PaymentDetailPage({
       <div className="flex items-center gap-2">
         <Link
           href="/sales/payments"
-          className="p-1.5 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300"
         >
           <ChevronLeft className="w-5 h-5" />
+          Back to Payments
         </Link>
-        <div className="text-xs text-slate-500">Back to Payments</div>
       </div>
 
       <PaymentDetailClient payment={payment} />
