@@ -18,6 +18,7 @@ const cookiePrefix = useSecureCookies ? '__Secure-' : '';
 const sessionCookieName = `${cookiePrefix}ace.${appEnv}.session-token`;
 
 export const authConfig: NextAuthConfig = {
+  trustHost: true,
   secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
   session: {
     strategy: 'jwt',
