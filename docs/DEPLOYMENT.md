@@ -156,11 +156,11 @@ Vercel Cron automatically triggers the following routes using `Authorization: Be
 
 | Job Name | Schedule | Path | Description |
 | :--- | :--- | :--- | :--- |
-| **Provider Reconciliation** | `*/5 * * * *` (5 min) | `/api/cron/provider-reconciliation` | Sweeps pending OneKhusa mobile money/card transactions. |
-| **EIS Outbox Worker** | `*/5 * * * *` (5 min) | `/api/cron/eis` | Batches outbound invoices to MRA EIS server. |
-| **Held-Sale Cleanup** | `0 * * * *` (Hourly) | `/api/cron/cleanup-held-sales` | Purges abandoned POS held carts older than 24 hours. |
-| **Stock Snapshot** | `0 22 * * *` (Midnight Blantyre) | `/api/cron/stock-snapshot` | Daily inventory balance snapshot per warehouse/outlet. |
-| **Quotation Expiry** | `0 22 * * *` (Midnight Blantyre) | `/api/cron/expire-reservations` | Releases stale stock reservations and marks quotes expired. |
+| **Provider Reconciliation** | `0 0 * * *` (5 min) | `/api/cron/provider-reconciliation` | Sweeps pending OneKhusa mobile money/card transactions. |
+| **EIS Outbox Worker** | `0 0 * * *` (5 min) | `/api/cron/eis` | Batches outbound invoices to MRA EIS server. |
+| **Held-Sale Cleanup** | `0 0 * * *` (Hourly) | `/api/cron/cleanup-held-sales` | Purges abandoned POS held carts older than 24 hours. |
+| **Stock Snapshot** | `0 0 * * *` (Midnight Blantyre) | `/api/cron/stock-snapshot` | Daily inventory balance snapshot per warehouse/outlet. |
+| **Quotation Expiry** | `0 0 * * *` (Midnight Blantyre) | `/api/cron/expire-reservations` | Releases stale stock reservations and marks quotes expired. |
 
 * All cron routes record heartbeats in the `cron_runs` table.
 * The system checks suite includes a **"Workers Alive"** test alerting if provider reconciliation or EIS worker has been inactive for > 15 minutes.
