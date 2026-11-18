@@ -1,5 +1,8 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { ArrowLeft } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { authorize } from '@/server/auth/authorize';
 import { PERMISSIONS } from '@/lib/permissions';
 import { db } from '@/server/db';
@@ -61,11 +64,19 @@ export default async function NewCreditNotePage({ searchParams }: NewCreditNoteP
   if (eligibleInvoices.length === 0) {
     return (
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-ace-navy">Issue Credit Note</h1>
-          <p className="text-sm text-muted-foreground">
-            No issued invoices currently exist to credit.
-          </p>
+        <div className="flex items-center gap-4">
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/sales/credit-notes">
+              <ArrowLeft className="mr-1 h-4 w-4" />
+              Back to Credit Notes
+            </Link>
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-ace-navy">Issue Credit Note</h1>
+            <p className="text-sm text-muted-foreground">
+              No issued invoices currently exist to credit.
+            </p>
+          </div>
         </div>
       </div>
     );
