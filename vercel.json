@@ -1,5 +1,7 @@
 {
-  "regions": ["fra1"],
+  "regions": [
+    "fra1"
+  ],
   "crons": [
     {
       "path": "/api/cron/provider-reconciliation",
@@ -7,7 +9,7 @@
     },
     {
       "path": "/api/cron/eis",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 0 * * *"
     },
     {
       "path": "/api/cron/cleanup-held-sales",
