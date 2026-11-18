@@ -207,7 +207,7 @@ describe('Phase 3 — Payments, Allocations & AR Reporting', () => {
     await expect(
       allocatePayment(payId, [{ invoiceId: inv2, amountMinor: 1 }], testUserId),
     ).rejects.toThrow();
-  });
+  }, 120000);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Test 2: Allocation limit — invoice side

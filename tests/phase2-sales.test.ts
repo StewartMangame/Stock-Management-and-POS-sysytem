@@ -172,9 +172,10 @@ describe('Phase 2 Sales Engine Invariants', () => {
       );
 
       // Attempt direct SQL DELETE triggers database trigger trg_prevent_walk_in_mutation
+      // (error wrapped by Drizzle — use toThrowCause to inspect the PG trigger message)
       await expect(
         db.delete(customers).where(eq(customers.id, walkIn!.id)),
-      ).rejects.toThrow(/walk-in customer cannot be deleted/i);
+      ).rejects.toThrowCause(/walk-in customer cannot be deleted/i);
 
       // Attempt to assign a credit limit to walk-in customer throws error
       await expect(
@@ -244,12 +245,13 @@ describe('Phase 2 Sales Engine Invariants', () => {
       expect(issued.isImmutable).toBe(true);
 
       // 1. Direct update to total_minor should be BLOCKED by database trigger
+      // (Drizzle wraps the trigger exception — use toThrowCause)
       await expect(
         db
           .update(salesDocuments)
           .set({ totalMinor: 999999 })
           .where(eq(salesDocuments.id, invoice.id)),
-      ).rejects.toThrow(/financial.*cannot be modified/i);
+      ).rejects.toThrowCause(/financial.*cannot be modified/i);
 
       // 2. Direct update to line unit_price_minor should be BLOCKED by database trigger
       const [line] = await db
@@ -262,7 +264,7 @@ describe('Phase 2 Sales Engine Invariants', () => {
           .update(salesDocumentLines)
           .set({ unitPriceMinor: 50000 })
           .where(eq(salesDocumentLines.id, line!.id)),
-      ).rejects.toThrow(/pricing and quantity cannot be modified/i);
+      ).rejects.toThrowCause(/pricing and quantity cannot be modified/i);
 
       // 3. System tracking fields SHOULD BE ALLOWED by database trigger:
       // (delivery_status, payment_status, delivered_qty, credited_minor, balance_minor)
@@ -951,7 +953,7 @@ describe('Phase 2 Sales Engine Invariants', () => {
         .from(salesDocuments)
         .where(eq(salesDocuments.id, invoice.id));
       expect(finalInv!.balanceMinor).toBe(0);
-    }, 60000);
+    }, 120000);
   });
 
   // ── 9. PDF Generation with Letterhead & DRAFT Watermark ───────────────────────

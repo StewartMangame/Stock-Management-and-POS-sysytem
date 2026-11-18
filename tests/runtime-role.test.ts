@@ -100,10 +100,15 @@ describe('Runtime Role: ace_app_user Permissions & Restrictions', () => {
     }
   });
 
-  it('5. ace_app_user CANNOT DELETE journal_batches (permission denied) and CANNOT mutate financial fields (trigger enforced)', async () => {
+  it('5. ace_app_user CANNOT UPDATE or DELETE journal_batches (permission denied)', async () => {
     if (!canConnectRuntime) return;
     const client = await runtimePool.connect();
     try {
+      // UPDATE is revoked via PostgreSQL privilege
+      await expect(
+        client.query('UPDATE journal_batches SET notes = \'tampered\' WHERE 1=0'),
+      ).rejects.toThrow(/permission denied/i);
+
       // DELETE is revoked via PostgreSQL privilege
       await expect(
         client.query('DELETE FROM journal_batches WHERE 1=0'),

@@ -131,6 +131,40 @@ export const journalBatchesRelations = relations(journalBatches, ({ one, many })
     references: [users.id],
   }),
   lines: many(journalLines),
+  exports: many(journalBatchExports),
+}));
+
+// ── Journal Batch Exports (Append-Only Export History & Approvals) ───────────
+
+export const journalBatchExports = pgTable(
+  'journal_batch_exports',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    batchId: uuid('batch_id')
+      .notNull()
+      .references(() => journalBatches.id, { onDelete: 'cascade' }),
+    /** 'initial' | 're_export' */
+    exportType: text('export_type').notNull().default('initial'),
+    exportedAt: timestamp('exported_at', { withTimezone: true }).notNull().defaultNow(),
+    exportedBy: uuid('exported_by').references(() => users.id, { onDelete: 'set null' }),
+    reExportApprovedBy: uuid('re_export_approved_by').references(() => users.id, { onDelete: 'set null' }),
+    reExportApprovedAt: timestamp('re_export_approved_at', { withTimezone: true }),
+    reExportReason: text('re_export_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('journal_batch_exports_batch_idx').on(t.batchId),
+    index('journal_batch_exports_type_idx').on(t.exportType),
+  ],
+);
+
+export const journalBatchExportsRelations = relations(journalBatchExports, ({ one }) => ({
+  batch: one(journalBatches, { fields: [journalBatchExports.batchId], references: [journalBatches.id] }),
+  exportedByUser: one(users, { fields: [journalBatchExports.exportedBy], references: [users.id] }),
+  reExportApprovedByUser: one(users, {
+    fields: [journalBatchExports.reExportApprovedBy],
+    references: [users.id],
+  }),
 }));
 
 // ── Journal Lines (Append-Only Double Entry Rows) ─────────────────────────────

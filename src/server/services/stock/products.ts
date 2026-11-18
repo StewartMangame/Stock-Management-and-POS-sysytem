@@ -11,6 +11,13 @@ import {
 import { eq, and, sql, desc, asc, ilike } from 'drizzle-orm';
 import { writeAuditLog } from '@/server/services/audit';
 import { executeStockMovements } from '@/server/services/stock/stock-engine';
+import {
+  ProductType,
+  normalizeProductType,
+  isStockTrackedProduct,
+  validateProductImageUrl,
+  getDefaultProductDate,
+} from '@/lib/product-types';
 
 export interface ProductInput {
   name: string;
@@ -19,7 +26,7 @@ export interface ProductInput {
   description?: string | null;
   categoryId?: string | null;
   uomId: string;
-  productType?: 'standard' | 'inventory' | 'non-inventory' | 'bundle' | 'service';
+  productType?: ProductType | 'non-inventory' | string;
   productDate?: string | null;   // 'YYYY-MM-DD'
   imageUrl?: string | null;
   sellingPriceMinor: number;
@@ -118,10 +125,14 @@ export async function getProductById(id: string) {
 export async function createProduct(input: ProductInput, actorId?: string) {
   const sku = input.sku.trim().toUpperCase();
 
-  const productType = input.productType ?? 'standard';
-  // Services and non-inventory items cannot have serial tracking
-  const noStock = productType === 'service' || productType === 'non-inventory';
-  const serialTracking = noStock ? false : (input.serialTracking ?? false);
+  if (input.imageUrl) {
+    const imgCheck = validateProductImageUrl(input.imageUrl);
+    if (!imgCheck.isValid) throw new Error(imgCheck.error);
+  }
+
+  const productType = normalizeProductType(input.productType ?? 'standard');
+  const isTracked = isStockTrackedProduct(productType);
+  const serialTracking = isTracked ? (input.serialTracking ?? false) : false;
 
   const [created] = await db.transaction(async (tx) => {
     const [p] = await tx
@@ -134,7 +145,7 @@ export async function createProduct(input: ProductInput, actorId?: string) {
         categoryId: input.categoryId || null,
         uomId: input.uomId,
         productType,
-        productDate: input.productDate || undefined,
+        productDate: input.productDate || getDefaultProductDate(),
         imageUrl: input.imageUrl || null,
         avgCostMinor: 0, // system maintained on goods receipts
         lastCostMinor: 0, // system maintained
@@ -227,14 +238,17 @@ export async function updateProduct(
   if (input.minStockAlert !== undefined)
     updateData['minStockAlert'] = input.minStockAlert ? String(input.minStockAlert) : '0';
   if (input.maxStock !== undefined) updateData['maxStock'] = input.maxStock ? String(input.maxStock) : null;
-  const noStockExisting = existing.productType === 'service' || existing.productType === 'non-inventory';
+  if (input.imageUrl !== undefined) {
+    if (input.imageUrl) {
+      const imgCheck = validateProductImageUrl(input.imageUrl);
+      if (!imgCheck.isValid) throw new Error(imgCheck.error);
+    }
+    updateData['imageUrl'] = input.imageUrl || null;
+  }
+  const noStockExisting = !isStockTrackedProduct(existing.productType);
   if (input.serialTracking !== undefined && !noStockExisting) {
     updateData['serialTracking'] = input.serialTracking;
   }
-  if (input.warrantyMonths !== undefined) updateData['warrantyMonths'] = input.warrantyMonths;
-  if (input.isActive !== undefined) updateData['isActive'] = input.isActive;
-  if (input.productDate !== undefined) updateData['productDate'] = input.productDate;
-  if (input.imageUrl !== undefined) updateData['imageUrl'] = input.imageUrl || null;
 
   const [updated] = await db.transaction(async (tx) => {
     const [p] = await tx

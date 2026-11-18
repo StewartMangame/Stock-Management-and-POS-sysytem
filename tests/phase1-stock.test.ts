@@ -344,15 +344,15 @@ describe('Phase 1 Stock & Purchasing Invariants', () => {
         })
         .returning();
 
-      // Direct SQL UPDATE must throw trigger exception
+      // Direct SQL UPDATE must throw trigger exception (error wrapped by Drizzle — use toThrowCause)
       await expect(
         db.execute(sql`UPDATE stock_movements SET quantity = 10 WHERE id = ${movement!.id}`),
-      ).rejects.toThrow(/append-only ledger: UPDATE and DELETE are prohibited/);
+      ).rejects.toThrowCause(/append-only ledger: UPDATE and DELETE are prohibited/);
 
       // Direct SQL DELETE must throw trigger exception
       await expect(
         db.execute(sql`DELETE FROM stock_movements WHERE id = ${movement!.id}`),
-      ).rejects.toThrow(/append-only ledger: UPDATE and DELETE are prohibited/);
+      ).rejects.toThrowCause(/append-only ledger: UPDATE and DELETE are prohibited/);
     });
   });
 

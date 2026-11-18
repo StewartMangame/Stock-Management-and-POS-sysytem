@@ -16,6 +16,7 @@ import { db } from '@/server/db';
 import {
   journalBatches,
   journalLines,
+  journalBatchExports,
   journalSourceEvents,
   accountMappings,
   salesDocuments,
@@ -25,7 +26,7 @@ import {
   users,
   roles,
 } from '@/server/db/schema';
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, desc } from 'drizzle-orm';
 import {
   createJournalBatch,
   seedDefaultAccountMappings,
@@ -221,12 +222,13 @@ describe('Milestone 7: Accounting Export & General Ledger Invariants', () => {
   });
 
   it('7. Re-export Controls: Re-exporting an already-exported batch requires manager authorization & reason', async () => {
-    // First export succeeds (done in test 5, so status is now 'exported')
-    const [batch] = await db
-      .select({ status: journalBatches.status })
-      .from(journalBatches)
-      .where(eq(journalBatches.id, createdBatchId));
-    expect(batch!.status).toBe('exported');
+    // First export succeeds (done in test 5, so an export record now exists in journal_batch_exports)
+    const priorExports = await db
+      .select()
+      .from(journalBatchExports)
+      .where(eq(journalBatchExports.batchId, createdBatchId));
+    expect(priorExports.length).toBeGreaterThan(0);
+    expect(priorExports[0]?.exportType).toBe('initial');
 
     // Attempting re-export without manager approval must fail
     await expect(
@@ -241,12 +243,15 @@ describe('Milestone 7: Accounting Export & General Ledger Invariants', () => {
 
     expect(reExportRes.isDraft).toBe(true);
 
-    const [updatedBatch] = await db
+    const exportsAfter = await db
       .select()
-      .from(journalBatches)
-      .where(eq(journalBatches.id, createdBatchId));
-    expect(updatedBatch!.reExportApprovedBy).toBe(testManagerId);
-    expect(updatedBatch!.reExportReason).toBe(
+      .from(journalBatchExports)
+      .where(eq(journalBatchExports.batchId, createdBatchId))
+      .orderBy(desc(journalBatchExports.exportedAt));
+    expect(exportsAfter.length).toBe(2);
+    expect(exportsAfter[0]?.exportType).toBe('re_export');
+    expect(exportsAfter[0]?.reExportApprovedBy).toBe(testManagerId);
+    expect(exportsAfter[0]?.reExportReason).toBe(
       'Downstream ERP import format reconciliation requested by Finance Director',
     );
   });

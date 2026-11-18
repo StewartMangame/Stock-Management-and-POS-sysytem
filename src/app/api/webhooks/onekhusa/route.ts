@@ -17,13 +17,6 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
-    // 0. DB-backed rate limit check on caller IP
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown_ip';
-    const rateCheck = await checkDbRateLimit(`webhook_ip:${ip}`, 120, 60);
-    if (!rateCheck.allowed) {
-      return NextResponse.json({ error: 'Too Many Requests' }, { status: 429 });
-    }
-
     const rawPayload = await req.text();
 
     // Collect headers
@@ -37,6 +30,13 @@ export async function POST(req: NextRequest) {
     const verified = provider.verifyWebhook(rawPayload, headersObj);
 
     if (!verified.isValid) {
+      // Item 10: Valid signed webhooks are never rate limited; only invalid attempts are throttled
+      const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown_ip';
+      const rateCheck = await checkDbRateLimit(`webhook_invalid_ip:${ip}`, 30, 60);
+      if (!rateCheck.allowed) {
+        return NextResponse.json({ error: 'Too Many Requests' }, { status: 429 });
+      }
+
       console.warn('[OneKhusa Webhook] Rejected invalid signature:', verified.error);
       return NextResponse.json({ error: verified.error || 'Invalid signature' }, { status: 401 });
     }

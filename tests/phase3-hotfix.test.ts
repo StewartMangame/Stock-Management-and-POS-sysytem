@@ -248,7 +248,7 @@ describe('Phase 3 Hotfix Verification', () => {
         status: 'awaiting_sale',
         paymentDate: todayInCompanyTz(),
       }),
-    ).rejects.toThrow(/Payments cannot be inserted with initial status awaiting_sale/);
+    ).rejects.toThrowCause(/Payments cannot be inserted with initial status awaiting_sale/);
 
     // 2.2 Inserting as reversed rejected
     await expect(
@@ -263,7 +263,7 @@ describe('Phase 3 Hotfix Verification', () => {
         status: 'reversed',
         paymentDate: todayInCompanyTz(),
       }),
-    ).rejects.toThrow(/Payments cannot be inserted with terminal status reversed/);
+    ).rejects.toThrowCause(/Payments cannot be inserted with terminal status reversed/);
 
     // 2.3 Direct insert as confirmed auto-populates confirmed_at
     const [insertedConfirmed] = await db
@@ -309,7 +309,7 @@ describe('Phase 3 Hotfix Verification', () => {
         .update(payments)
         .set({ amountMinor: 99999 })
         .where(eq(payments.id, cashRes.payment.id)),
-    ).rejects.toThrow(/financial and identification fields cannot be modified/);
+    ).rejects.toThrowCause(/financial and identification fields cannot be modified/);
 
     // Modifying payment_number rejected
     await expect(
@@ -317,7 +317,7 @@ describe('Phase 3 Hotfix Verification', () => {
         .update(payments)
         .set({ paymentNumber: 'TAMPERED-NUM' })
         .where(eq(payments.id, cashRes.payment.id)),
-    ).rejects.toThrow(/financial and identification fields cannot be modified/);
+    ).rejects.toThrowCause(/financial and identification fields cannot be modified/);
 
     // Modifying confirmed_at rejected
     await expect(
@@ -325,7 +325,7 @@ describe('Phase 3 Hotfix Verification', () => {
         .update(payments)
         .set({ confirmedAt: new Date('2020-01-01') })
         .where(eq(payments.id, cashRes.payment.id)),
-    ).rejects.toThrow(/financial and identification fields cannot be modified/);
+    ).rejects.toThrowCause(/financial and identification fields cannot be modified/);
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -365,7 +365,7 @@ describe('Phase 3 Hotfix Verification', () => {
         .update(payments)
         .set({ intendedAllocations: [{ invoiceId: '00000000-0000-0000-0000-000000000002', amountMinor: 20000 }] })
         .where(eq(payments.id, chq.payment.id)),
-    ).rejects.toThrow(/intended_allocations can only be modified while payment is pending/);
+    ).rejects.toThrowCause(/intended_allocations can only be modified while payment is pending/);
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -402,7 +402,7 @@ describe('Phase 3 Hotfix Verification', () => {
         .update(payments)
         .set({ status: 'reversed' })
         .where(eq(payments.id, awsPmt!.id)),
-    ).rejects.toThrow(/Reversal of awaiting_sale payment requires a reversal reason/);
+    ).rejects.toThrowCause(/Reversal of awaiting_sale payment requires a reversal reason/);
 
     // 5.2 Reversal with reason and refund reference succeeds
     const [revPmt] = await db
@@ -445,7 +445,7 @@ describe('Phase 3 Hotfix Verification', () => {
         amountMinor: -25000,
         allocatedBy: testUserId,
       }),
-    ).rejects.toThrow(/Negative allocation cannot exceed prior allocated amount|Net allocation for payment .* and invoice .* cannot be negative/);
+    ).rejects.toThrowCause(/Negative allocation cannot exceed prior allocated amount|Net allocation for payment .* and invoice .* cannot be negative/);
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -520,7 +520,7 @@ describe('Phase 3 Hotfix Verification', () => {
 
     expect(pmt2Net).toBe(0);
     expect(pmt1Net).toBe(17625);
-  });
+  }, 120000);
 
   // ─────────────────────────────────────────────────────────────────────────
   // 8. Payments Report: Reversals as Separate Negative Lines

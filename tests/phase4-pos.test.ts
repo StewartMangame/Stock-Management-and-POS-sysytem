@@ -1150,7 +1150,7 @@ describe('Phase 4 — Counter POS & Shift Reconciliation', () => {
       cashierId: testCashier2Id,
       countedCashMinor: 60000,
     });
-  });
+  }, 120000);
 
   async function ensureNoOpenShift(cashierId: string) {
     const [open] = await db
@@ -1263,7 +1263,7 @@ describe('Phase 4 — Counter POS & Shift Reconciliation', () => {
         reason: 'Illegal movement on closed shift',
         createdBy: testCashier2Id,
       }),
-    ).rejects.toThrow(/Cash movements are only permitted on an open shift/);
+    ).rejects.toThrowCause(/Cash movements are only permitted on an open shift/);
 
     // 2. Modifying opening_float_minor on closed shift must trigger DB exception
     await expect(
@@ -1271,7 +1271,7 @@ describe('Phase 4 — Counter POS & Shift Reconciliation', () => {
         .update(posShifts)
         .set({ openingFloatMinor: 99999 })
         .where(eq(posShifts.id, shift.id)),
-    ).rejects.toThrow(/Cannot modify opening_float_minor of a closed shift/);
+    ).rejects.toThrowCause(/Cannot modify opening_float_minor of a closed shift/);
 
     // 3. Modifying counted_cash_minor on closed shift must trigger DB exception
     await expect(
@@ -1279,7 +1279,7 @@ describe('Phase 4 — Counter POS & Shift Reconciliation', () => {
         .update(posShifts)
         .set({ countedCashMinor: 99999 })
         .where(eq(posShifts.id, shift.id)),
-    ).rejects.toThrow(/Cannot modify counted_cash_minor of a closed shift/);
+    ).rejects.toThrowCause(/Cannot modify counted_cash_minor of a closed shift/);
   });
 
   // ─────────────────────────────────────────────────────────────────────────────

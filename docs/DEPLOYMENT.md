@@ -4,13 +4,17 @@ Ace Holdings Stock Management & Point of Sale (POS) System
 
 ---
 
-## 1. Architecture Overview
+## 1. Architecture Overview & Region Alignment
 
 * **Frontend & API Application**: Next.js 15 App Router hosted on **Vercel Serverless**.
 * **Database**: **Neon PostgreSQL** serverless cluster accessed via `@neondatabase/serverless` WebSocket pool.
+* **Region Alignment & Latency Minimization**:
+  * **Neon Database Region**: Select the Neon database region deliberately based on end-user location and Vercel compute topology (e.g. Frankfurt `aws-eu-central-1` or Ohio `aws-us-east-2`).
+  * **Vercel Function Region Match**: In `vercel.json`, ensure `"regions": ["fra1"]` (or the corresponding datacenter code) matches the exact cloud region of the Neon database. Running serverless functions in the same region as the database prevents cross-continental round-trip latency on WebSocket database connections and interactive transactions.
 * **Separation of Roles**:
   * **Runtime Application**: Connects via `DATABASE_URL` using the restricted role `ace_app_user`.
   * **Database Migrations**: Executed strictly from developer workstations or CI/CD pipelines via `MIGRATION_DATABASE_URL` using the owner role (`neondb_owner`). **Migrations never run during the Vercel build process.**
+* **Point-in-Time Restore**: The recovery window and retention period depend strictly on the active Neon tier (e.g., Free tier: 24 hours; Launch/Scale tier: up to 30 days of PITR history). Weekly `pg_dump` backups must be stored in secure offsite cloud storage.
 
 ---
 
@@ -67,13 +71,13 @@ Configure the following variables in the **Vercel Project Settings > Environment
 | `AUTH_URL` | Production, Preview | URL | Canonical deployment URL (`https://your-domain.vercel.app`). |
 | `CRON_SECRET` | Production, Preview | Secret | Secret token sent by Vercel Cron as Bearer header. |
 | `HEALTH_CHECK_SECRET` | Production, Preview | Secret | Secret token for external uptime monitoring (`x-health-check-secret`). |
-| `ONEKHUSA_MODE` | Production, Preview | String | `live` for Production; `mock` for Staging/Local. (`mock` is blocked in production). |
-| `ONEKHUSA_BASE_URL` | Production | URL | `https://api.onekhusa.com/v1` |
-| `ONEKHUSA_API_KEY` | Production | Secret | Production API key. |
-| `ONEKHUSA_API_SECRET` | Production | Secret | Production API secret. |
-| `ONEKHUSA_ORGANISATION_ID` | Production | String | Merchant organization ID. |
-| `ONEKHUSA_MERCHANT_ACCOUNT_NUMBER` | Production | Number | Merchant account ID. |
-| `ONEKHUSA_WEBHOOK_SECRET` | Production | Secret | HMAC webhook signature secret. |
+| `ONEKHUSA_MODE` | Production, Preview | String | `live` for Production; `sandbox` (or empty) for Staging; `mock` for Local only. (`mock` is blocked in production). |
+| `ONEKHUSA_BASE_URL` | Production, Preview | URL | `https://api.onekhusa.com/v1` (Production) or `https://api.onekhusa.com/sandbox/v1` (Staging). |
+| `ONEKHUSA_API_KEY` | Production, Preview | Secret | API key. |
+| `ONEKHUSA_API_SECRET` | Production, Preview | Secret | API secret. |
+| `ONEKHUSA_ORGANISATION_ID` | Production, Preview | String | Merchant organization ID. |
+| `ONEKHUSA_MERCHANT_ACCOUNT_NUMBER` | Production, Preview | Number | Merchant account number. |
+| `ONEKHUSA_WEBHOOK_SECRET` | Production, Preview | Secret | HMAC-SHA512 webhook signature secret. |
 | `EIS_ENABLED` | Production | Boolean | `true` when MRA EIS integration is activated; `false` otherwise. |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Production, Preview | Public | Cloudflare Turnstile public site key. |
 | `TURNSTILE_SECRET_KEY` | Production, Preview | Secret | Cloudflare Turnstile secret key. |
@@ -81,20 +85,32 @@ Configure the following variables in the **Vercel Project Settings > Environment
 
 > ⚠️ **CRITICAL SECURITY RULES**:
 > 1. `MIGRATION_DATABASE_URL` MUST NEVER be set in Vercel.
-> 2. `ADMIN_SEED_PASSWORD` MUST NEVER be set in Vercel.
+> 2. `ADMIN_SEED_PASSWORD` MUST NEVER be set in Vercel (local CLI seed only).
 > 3. No sensitive credentials may ever carry the `NEXT_PUBLIC_` prefix.
 
 ---
 
-## 4. Staging & Preview Deployments
+## 4. Staging & Preview Deployments Checklist
 
+### 4.1 Staging Environment Variables List
+When deploying to Staging / Preview on Vercel, configure:
+* `APP_ENV=staging` (enables yellow top-banner across all pages and prints red `STAGING, TEST DATA, NOT A REAL TAX INVOICE` on all receipts and invoices)
+* `ONEKHUSA_MODE=sandbox` (or left empty; never `mock` in staging or production)
+* Unified OneKhusa Credentials: `ONEKHUSA_BASE_URL`, `ONEKHUSA_API_KEY`, `ONEKHUSA_API_SECRET`, `ONEKHUSA_ORGANISATION_ID`, `ONEKHUSA_MERCHANT_ACCOUNT_NUMBER`, `ONEKHUSA_WEBHOOK_SECRET`
+* Cloudflare Turnstile Keys: `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY`
+* `HEALTH_CHECK_SECRET` (for external uptime monitors querying `/api/health/db`)
+* **NO `ADMIN_SEED_PASSWORD`**: Admin password seed is strictly run locally on developer machines, never exposed to Vercel environment variables.
+
+### 4.2 Behavior When OneKhusa Is Unconfigured in Non-Mock Environments
+When `APP_ENV` is `staging` or `production` and OneKhusa credentials are not supplied:
+* Payment methods requiring the online gateway (mobile money push prompts for Airtel Money / TNM Mpamba) are automatically hidden from the POS and payment selection UI.
+* A clear notification is surfaced to cashiers: *"Online payment gateway is not configured for this environment. Please record transactions via Cash, Physical Card Terminal, or Bank Transfer."*
+
+### 4.3 Preview Deployments & Cookie Isolation
 1. **Database Isolation**:
    * Preview deployments use the **Staging database** branch on Neon.
    * Vercel **Deployment Protection** (Authentication / Password) must remain **ENABLED** for all Preview deployments.
-2. **Environment Banner & Watermarks**:
-   * Setting `APP_ENV=staging` automatically renders a persistent yellow warning banner across all UI pages: `⚠️ STAGING ENVIRONMENT — TEST DATA ONLY`.
-   * All PDFs (invoices, receipts, statements) and thermal receipts automatically print the red watermark banner: `STAGING, TEST DATA, NOT A REAL TAX INVOICE`.
-3. **Session Cookie Isolation**:
+2. **Session Cookie Isolation**:
    * Session cookies are environment-namespaced:
      * Staging: `__Secure-ace.staging.session-token`
      * Production: `__Secure-ace.production.session-token`

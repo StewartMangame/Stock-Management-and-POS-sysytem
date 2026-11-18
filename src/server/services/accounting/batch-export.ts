@@ -10,8 +10,8 @@
  */
 
 import { db } from '@/server/db';
-import { journalBatches, journalLines, users } from '@/server/db/schema';
-import { eq, asc } from 'drizzle-orm';
+import { journalBatches, journalLines, journalBatchExports, users } from '@/server/db/schema';
+import { eq, asc, desc } from 'drizzle-orm';
 import { formatMwk } from '@/lib/money';
 
 /**
@@ -62,8 +62,16 @@ export async function exportJournalBatchToCsv(
     throw new Error(`Journal batch ${batchId} not found.`);
   }
 
-  // Re-export guard: if already exported, manager approval with reason is mandatory
-  if (batch.status === 'exported') {
+  // Re-export guard: if already exported in journal_batch_exports, manager approval with reason is mandatory
+  const priorExports = await db
+    .select()
+    .from(journalBatchExports)
+    .where(eq(journalBatchExports.batchId, batchId))
+    .orderBy(desc(journalBatchExports.exportedAt));
+
+  const isReExport = priorExports.length > 0;
+
+  if (isReExport) {
     if (!reExportApproval?.approvedByManagerId || !reExportApproval.reason?.trim()) {
       throw new Error(
         'Re-export requires manager approval and a stated reason. This batch has already been exported.',
@@ -79,16 +87,6 @@ export async function exportJournalBatchToCsv(
     if (!manager) {
       throw new Error('Designated re-export approving manager does not exist.');
     }
-
-    // Record re-export approval
-    await db
-      .update(journalBatches)
-      .set({
-        reExportApprovedBy: reExportApproval.approvedByManagerId,
-        reExportApprovedAt: new Date(),
-        reExportReason: reExportApproval.reason.trim(),
-      })
-      .where(eq(journalBatches.id, batchId));
   }
 
   // Fetch all lines for the batch in order
@@ -178,15 +176,16 @@ export async function exportJournalBatchToCsv(
   const csvContent = BOM + rows.join('\r\n');
   const filename = `${batch.batchNumber}-DRAFT.csv`;
 
-  // Update batch export timestamp
-  await db
-    .update(journalBatches)
-    .set({
-      status: 'exported',
-      exportedAt: new Date(),
-      exportedBy: actorId,
-    })
-    .where(eq(journalBatches.id, batchId));
+  // Record export in append-only journal_batch_exports (journal_batches remains strictly append-only)
+  await db.insert(journalBatchExports).values({
+    batchId,
+    exportType: isReExport ? 're_export' : 'initial',
+    exportedAt: new Date(),
+    exportedBy: actorId,
+    reExportApprovedBy: isReExport ? reExportApproval!.approvedByManagerId : null,
+    reExportApprovedAt: isReExport ? new Date() : null,
+    reExportReason: isReExport ? reExportApproval!.reason.trim() : null,
+  });
 
   return {
     filename,
