@@ -33,6 +33,8 @@ export class RateLimitError extends CredentialsSignin {
 
 export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   ...authConfig,
+  trustHost: true,
+  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
 
   providers: [
     Credentials({
