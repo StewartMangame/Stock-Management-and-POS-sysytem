@@ -28,6 +28,7 @@ export async function GET() {
     appEnv: process.env.APP_ENV ?? null,
     nodeEnv: process.env.NODE_ENV ?? null,
     vercel: !!process.env.VERCEL,
+    vercelProjectName: process.env.VERCEL_PROJECT_NAME ?? null,
     authRelatedKeys,
     allKeysSafe: allKeys.filter(
       (k) =>
