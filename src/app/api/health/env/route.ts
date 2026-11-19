@@ -12,6 +12,10 @@ export async function GET() {
   const nextAuthSecret = process.env.NEXTAUTH_SECRET;
   const dbUrl = process.env.DATABASE_URL;
 
+  // List all environment variable names (keys only, never values)
+  const allKeys = Object.keys(process.env).sort();
+  const authRelatedKeys = allKeys.filter((k) => k.toUpperCase().includes('AUTH'));
+
   return NextResponse.json({
     status: 'ok',
     hasAuthSecret: !!authSecret && authSecret.length > 0,
@@ -24,5 +28,14 @@ export async function GET() {
     appEnv: process.env.APP_ENV ?? null,
     nodeEnv: process.env.NODE_ENV ?? null,
     vercel: !!process.env.VERCEL,
+    authRelatedKeys,
+    allKeysSafe: allKeys.filter(
+      (k) =>
+        !k.includes('SECRET') &&
+        !k.includes('PASS') &&
+        !k.includes('KEY') &&
+        !k.includes('URL') &&
+        !k.includes('TOKEN'),
+    ),
   });
 }
