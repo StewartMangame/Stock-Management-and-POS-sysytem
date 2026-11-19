@@ -12,9 +12,24 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { loginSchema, type LoginInput } from '@/lib/validation';
 
-const ERROR_MESSAGES: Record<string, string> = {
-  CredentialsSignin: 'Incorrect email or password.',
+/**
+ * Maps NextAuth v5 error codes to user-friendly messages.
+ *
+ * NextAuth v5 SignInResponse carries two fields:
+ *   result.error  - the AuthError type name (e.g. "CredentialsSignin", "CallbackRouteError")
+ *   result.code   - the custom code set on a CredentialsSignin subclass (e.g. "RateLimitExceeded")
+ *
+ * Check `result.code` first (custom codes), then fall back to `result.error` (error type).
+ */
+const CODE_MESSAGES: Record<string, string> = {
+  // Custom codes set on CredentialsSignin subclasses (result.code)
   RateLimitExceeded: 'Too many failed attempts. Please try again in 15 minutes.',
+};
+
+const ERROR_MESSAGES: Record<string, string> = {
+  // Standard NextAuth v5 error types (result.error)
+  CredentialsSignin: 'Incorrect email or password.',
+  CallbackRouteError: 'Sign in failed due to a server error. Please try again later.',
   default: 'Sign in failed. Please try again.',
 };
 
@@ -23,10 +38,16 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const callbackUrl = searchParams?.get('callbackUrl') ?? '/dashboard';
   const errorCode = searchParams?.get('error') ?? null;
+  const urlCode = searchParams?.get('code') ?? null;
 
   const [isPending, startTransition] = useTransition();
   const [serverError, setServerError] = useState<string | null>(
-    errorCode ? (ERROR_MESSAGES[errorCode] ?? ERROR_MESSAGES['default'] ?? null) : null,
+    // Handle error codes from redirect-based flows (e.g. middleware redirect to /login?error=...)
+    urlCode
+      ? (CODE_MESSAGES[urlCode] ?? ERROR_MESSAGES[errorCode ?? ''] ?? ERROR_MESSAGES['default'] ?? null)
+      : errorCode
+        ? (ERROR_MESSAGES[errorCode] ?? ERROR_MESSAGES['default'] ?? null)
+        : null,
   );
 
   const form = useForm<LoginInput>({
@@ -44,12 +65,24 @@ function LoginForm() {
       });
 
       if (result?.error) {
-        const msg = ERROR_MESSAGES[result.error] ?? ERROR_MESSAGES['default'] ?? 'Sign in failed.';
+        // result.code carries the custom code set on CredentialsSignin subclasses.
+        // Check it first; fall back to the error type name.
+        const msg =
+          (result.code ? CODE_MESSAGES[result.code] : undefined) ??
+          ERROR_MESSAGES[result.error] ??
+          ERROR_MESSAGES['default'] ??
+          'Sign in failed.';
+
+        if (process.env.NODE_ENV !== 'production') {
+          // Surface the actual error type in dev so it is easy to debug.
+          console.warn('[login] signIn error:', { error: result.error, code: result.code });
+        }
+
         setServerError(msg);
         return;
       }
 
-      // Success — let middleware handle redirect to /change-password if needed
+      // Success - let middleware handle redirect to /change-password if needed
       router.push(callbackUrl);
       router.refresh();
     });
