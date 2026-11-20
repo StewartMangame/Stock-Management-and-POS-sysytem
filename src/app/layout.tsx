@@ -25,6 +25,10 @@ export const metadata: Metadata = {
   },
   description:
     'Stock management, sales and point-of-sale system for Ace Holdings Limited, Blantyre, Malawi.',
+  icons: {
+    icon: '/brand/ace-logo.png',
+    apple: '/brand/ace-logo.png',
+  },
   robots: { index: false, follow: false }, // internal system — no public indexing
 };
 

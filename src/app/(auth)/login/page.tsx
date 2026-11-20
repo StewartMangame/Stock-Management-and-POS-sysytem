@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition, Suspense } from 'react';
+import Image from 'next/image';
 import { signIn } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
@@ -94,10 +95,17 @@ function LoginForm() {
       <div className="h-2 w-full rounded-t-lg bg-gradient-to-r from-ace-navy via-ace-blue to-ace-sky" />
 
       <CardHeader className="space-y-3 pb-6 pt-8">
-        {/* Logo placeholder */}
+        {/* Company Logo */}
         <div className="flex justify-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-ace-navy shadow-md">
-            <span className="text-xl font-bold text-white">A</span>
+          <div className="relative flex h-16 w-32 items-center justify-center">
+            <Image
+              src="/brand/ace-logo.png"
+              alt="Ace Holdings Limited Logo"
+              width={160}
+              height={80}
+              className="h-16 w-auto object-contain"
+              priority
+            />
           </div>
         </div>
         <div className="text-center">
