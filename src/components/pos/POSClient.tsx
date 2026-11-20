@@ -26,7 +26,15 @@ import {
   Sparkles,
   RotateCcw,
   AlertTriangle,
+  MoreHorizontal,
+  ArrowLeft,
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { formatMwk, parseKwachaToMinor } from '@/lib/money';
 import {
   openShiftAction,
@@ -112,6 +120,7 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [mobileTab, setMobileTab] = useState<'catalog' | 'cart'>('catalog');
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Modals state
@@ -379,6 +388,7 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
       });
 
       setCart([]);
+      setMobileTab('catalog');
       setHeldCount((prev) => prev + 1);
       toast.success(`Sale held under reference "${ref.trim()}"`);
     } catch (err: unknown) {
@@ -458,6 +468,7 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
     });
     setIsPostSaleOpen(true);
     setCart([]);
+    setMobileTab('catalog');
   };
 
   // ==========================================
@@ -537,92 +548,153 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
   // VIEW B: Live Counter POS Screen
   // ==========================================
   return (
-    <div className="flex flex-col h-[calc(100vh-5rem)] -m-6 overflow-hidden bg-background">
+    <div className="flex flex-col h-[calc(100dvh-3.5rem)] -m-3 sm:-m-4 md:-m-6 overflow-hidden bg-background">
       {/* ── TOP ACTION BAR ────────────────────────────────────────────────── */}
-      <header className="flex items-center justify-between px-6 py-2.5 border-b border-border bg-card shadow-xs shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="font-extrabold text-sm tracking-tight text-ace-navy">ACE POS</span>
-            <Badge variant="outline" className="border-ace-blue bg-ace-band/40 text-ace-navy font-bold text-xs">
-              Shift #{shift.shiftNumber}
+      <header className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 px-3 sm:px-4 md:px-6 py-2 sm:py-2.5 border-b border-border bg-card shadow-xs shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <span className="font-extrabold text-xs sm:text-sm tracking-tight text-ace-navy">ACE POS</span>
+            <Badge variant="outline" className="border-ace-blue bg-ace-band/40 text-ace-navy font-bold text-[10px] sm:text-xs">
+              #{shift.shiftNumber}
             </Badge>
           </div>
-          <span className="text-muted-foreground">•</span>
-          <span className="text-xs font-medium text-muted-foreground">
+          <span className="text-muted-foreground hidden sm:inline">•</span>
+          <span className="text-[11px] sm:text-xs font-medium text-muted-foreground truncate max-w-[120px] sm:max-w-none">
             {shift.locationName}
           </span>
-          <span className="text-muted-foreground">•</span>
-          <span className="text-xs font-medium text-muted-foreground">
+          <span className="text-muted-foreground hidden md:inline">•</span>
+          <span className="text-[11px] sm:text-xs font-medium text-muted-foreground hidden md:inline">
             Cashier: <strong className="text-foreground">{currentUser.name}</strong>
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           {/* Held Sales Button */}
           <Button
             size="sm"
             variant="outline"
             onClick={() => setIsHeldModalOpen(true)}
-            className="h-8 text-xs font-semibold relative"
+            className="h-8 text-xs font-semibold relative px-2.5"
           >
-            <PauseCircle className="mr-1.5 h-3.5 w-3.5 text-amber-600" />
-            Held Sales
+            <PauseCircle className="sm:mr-1.5 h-3.5 w-3.5 text-amber-600" />
+            <span className="hidden sm:inline">Held</span>
             {heldCount > 0 && (
-              <span className="ml-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+              <span className="ml-1 sm:ml-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
                 {heldCount}
               </span>
             )}
           </Button>
 
-          {/* Cash In / Out */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setIsCashMovementOpen(true)}
-            className="h-8 text-xs font-semibold"
-          >
-            <DollarSign className="mr-1.5 h-3.5 w-3.5 text-ace-blue" />
-            Cash In/Out
-          </Button>
-
-          {/* X-Report */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setIsXReportOpen(true)}
-            className="h-8 text-xs font-semibold"
-          >
-            <FileText className="mr-1.5 h-3.5 w-3.5" />
-            X-Report
-          </Button>
-
-          {/* Counter Returns */}
-          <Link href="/pos/returns">
-            <Button size="sm" variant="outline" className="h-8 text-xs font-semibold">
-              <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-              Returns
+          {/* Desktop utility buttons */}
+          <div className="hidden lg:flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setIsCashMovementOpen(true)}
+              className="h-8 text-xs font-semibold"
+            >
+              <DollarSign className="mr-1.5 h-3.5 w-3.5 text-ace-blue" />
+              Cash In/Out
             </Button>
-          </Link>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setIsXReportOpen(true)}
+              className="h-8 text-xs font-semibold"
+            >
+              <FileText className="mr-1.5 h-3.5 w-3.5" />
+              X-Report
+            </Button>
+            <Link href="/pos/returns">
+              <Button size="sm" variant="outline" className="h-8 text-xs font-semibold">
+                <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                Returns
+              </Button>
+            </Link>
+          </div>
+
+          {/* Mobile / Tablet More Actions Menu */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" className="h-8 w-8 p-0 lg:hidden" aria-label="More actions">
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem onClick={() => setIsCashMovementOpen(true)}>
+                <DollarSign className="mr-2 h-4 w-4 text-ace-blue" />
+                Cash In/Out
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setIsXReportOpen(true)}>
+                <FileText className="mr-2 h-4 w-4" />
+                X-Report
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/pos/returns">
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Counter Returns
+                </Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {/* Close Shift */}
           <Button
             size="sm"
             variant="destructive"
             onClick={() => setIsCloseShiftOpen(true)}
-            className="h-8 text-xs font-bold"
+            className="h-8 text-xs font-bold px-2.5 sm:px-3"
           >
-            <Lock className="mr-1.5 h-3.5 w-3.5" />
-            Close Shift
+            <Lock className="sm:mr-1.5 h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Close Shift</span>
+            <span className="sm:hidden">Close</span>
           </Button>
         </div>
       </header>
 
+      {/* ── MOBILE / TABLET TAB SWITCHER ───────────────────────────────── */}
+      <div className="flex border-b border-border bg-card lg:hidden shrink-0">
+        <button
+          type="button"
+          onClick={() => setMobileTab('catalog')}
+          className={`flex-1 py-2 text-xs font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
+            mobileTab === 'catalog'
+              ? 'border-ace-navy text-ace-navy bg-ace-band/20'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Package className="h-3.5 w-3.5" />
+          Catalog ({filteredProducts.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileTab('cart')}
+          className={`flex-1 py-2 text-xs font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${
+            mobileTab === 'cart'
+              ? 'border-ace-navy text-ace-navy bg-ace-band/20'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <ShoppingCart className="h-3.5 w-3.5" />
+          Cart ({cart.reduce((s, c) => s + c.quantity, 0)})
+          {grandTotalMinor > 0 && (
+            <span className="font-mono text-ace-blue font-bold">
+              • {formatMwk(grandTotalMinor)}
+            </span>
+          )}
+        </button>
+      </div>
+
       {/* ── MAIN WORKSPACE: LEFT CATALOG + RIGHT CART ─────────────────────── */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* LEFT: Product Catalog (60%) */}
-        <section className="flex flex-col flex-1 border-r border-border overflow-hidden bg-muted/10">
+      <div className="flex flex-1 overflow-hidden min-h-0">
+        {/* LEFT: Product Catalog */}
+        <section
+          className={`flex-col flex-1 border-r border-border overflow-hidden bg-muted/10 ${
+            mobileTab === 'cart' ? 'hidden lg:flex' : 'flex'
+          }`}
+        >
           {/* Search & Barcode Input */}
-          <div className="p-4 border-b border-border bg-card space-y-3">
+          <div className="p-3 sm:p-4 border-b border-border bg-card space-y-2.5 sm:space-y-3 shrink-0">
             <div className="relative">
               <Barcode className="absolute left-3.5 top-2.5 h-5 w-5 text-muted-foreground" />
               <Input
@@ -630,7 +702,7 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
                 placeholder="Scan barcode or search products by SKU / name... (F2)"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-11 h-10 text-sm font-medium bg-background"
+                className="pl-11 h-10 text-xs sm:text-sm font-medium bg-background"
               />
             </div>
 
@@ -665,7 +737,7 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
           </div>
 
           {/* Product Grid */}
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex-1 overflow-y-auto p-3 sm:p-4">
             {loadingCatalog ? (
               <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
                 Loading products catalog...
@@ -676,7 +748,7 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
                 <p className="text-sm font-medium">No products matching your search</p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-3">
                 {filteredProducts.map((p) => {
                   const outOfStock = p.availableQty <= 0;
                   return (
@@ -685,7 +757,7 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
                       type="button"
                       disabled={outOfStock}
                       onClick={() => handleAddToCart(p)}
-                      className={`flex flex-col justify-between text-left p-3.5 rounded-xl border transition-all duration-150 ${
+                      className={`flex flex-col justify-between text-left p-2.5 sm:p-3.5 rounded-xl border transition-all duration-150 ${
                         outOfStock
                           ? 'opacity-50 cursor-not-allowed bg-muted/40 border-dashed border-border'
                           : 'bg-card hover:border-ace-sky hover:shadow-md cursor-pointer border-border'
@@ -693,7 +765,7 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
                     >
                       <div className="space-y-1">
                         <div className="flex items-center justify-between gap-1">
-                          <span className="text-[11px] font-mono font-bold text-muted-foreground truncate">
+                          <span className="text-[10px] sm:text-[11px] font-mono font-bold text-muted-foreground truncate">
                             {p.sku}
                           </span>
                           {p.isSerialTracked && (
@@ -712,12 +784,12 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
                         </h4>
                       </div>
 
-                      <div className="mt-3 pt-2 border-t border-border/60 flex items-center justify-between">
-                        <span className="font-bold text-sm text-ace-navy">
+                      <div className="mt-2.5 sm:mt-3 pt-2 border-t border-border/60 flex items-center justify-between gap-1">
+                        <span className="font-bold text-xs sm:text-sm text-ace-navy truncate">
                           {formatMwk(p.sellingPriceMinor)}
                         </span>
                         <span
-                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                          className={`text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
                             outOfStock
                               ? 'bg-destructive/10 text-destructive'
                               : p.availableQty <= 5
@@ -725,7 +797,7 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
                                 : 'bg-emerald-100 text-emerald-800'
                           }`}
                         >
-                          {outOfStock ? 'Out of Stock' : `${p.availableQty} in stock`}
+                          {outOfStock ? 'Out' : `${p.availableQty}`}
                         </span>
                       </div>
                     </button>
@@ -734,12 +806,55 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
               </div>
             )}
           </div>
+
+          {/* Sticky Mobile Cart Checkout Bar */}
+          {cart.length > 0 && (
+            <div className="p-3 border-t border-border bg-card shadow-lg lg:hidden flex items-center justify-between gap-3 shrink-0">
+              <div className="min-w-0">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase block truncate">
+                  {cart.reduce((s, c) => s + c.quantity, 0)} items in cart
+                </span>
+                <span className="text-sm font-black text-ace-navy block truncate">
+                  {formatMwk(grandTotalMinor)}
+                </span>
+              </div>
+              <Button
+                type="button"
+                onClick={() => setMobileTab('cart')}
+                className="bg-ace-navy hover:bg-ace-navy-deep text-white font-bold h-9 px-3.5 text-xs shadow-sm flex items-center gap-1.5 shrink-0"
+              >
+                <ShoppingCart className="h-3.5 w-3.5" />
+                View Cart & Pay →
+              </Button>
+            </div>
+          )}
         </section>
 
-        {/* RIGHT: Cart & Tender Panel (40%) */}
-        <section className="flex flex-col w-[420px] shrink-0 bg-card">
+        {/* RIGHT: Cart & Tender Panel */}
+        <section
+          className={`flex-col w-full lg:w-[380px] xl:w-[440px] shrink-0 bg-card overflow-hidden ${
+            mobileTab === 'catalog' ? 'hidden lg:flex' : 'flex'
+          }`}
+        >
+          {/* Mobile Back To Catalog */}
+          <div className="p-2.5 border-b border-border bg-muted/10 flex items-center justify-between lg:hidden shrink-0">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setMobileTab('catalog')}
+              className="h-8 text-xs font-semibold text-ace-navy"
+            >
+              <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+              Back to Catalog
+            </Button>
+            <span className="text-xs font-bold text-muted-foreground">
+              {cart.reduce((s, c) => s + c.quantity, 0)} Items
+            </span>
+          </div>
+
           {/* Customer Selector */}
-          <div className="p-3.5 border-b border-border bg-muted/20">
+          <div className="p-3 sm:p-3.5 border-b border-border bg-muted/20 shrink-0">
             <div className="flex items-center justify-between mb-1">
               <Label className="text-[11px] font-bold text-muted-foreground uppercase">
                 Customer Account
@@ -887,7 +1002,10 @@ export function POSClient({ initialShift, locations, currentUser }: POSClientPro
                 type="button"
                 variant="outline"
                 disabled={cart.length === 0}
-                onClick={() => setCart([])}
+                onClick={() => {
+                  setCart([]);
+                  setMobileTab('catalog');
+                }}
                 className="h-9 text-xs font-semibold text-destructive hover:bg-destructive/10"
               >
                 <Trash2 className="mr-1.5 h-3.5 w-3.5" />

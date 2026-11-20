@@ -50,8 +50,8 @@ export function QuotationsTable({ quotations }: QuotationsTableProps) {
     <div className="space-y-4">
       {/* Top action bar */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-1 items-center gap-3">
-          <div className="relative max-w-sm flex-1">
+        <div className="flex flex-1 flex-wrap items-center gap-3">
+          <div className="relative max-w-sm flex-1 min-w-[220px]">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search by quote # or customer..."
@@ -61,7 +61,7 @@ export function QuotationsTable({ quotations }: QuotationsTableProps) {
             />
           </div>
 
-          <div className="flex items-center gap-1.5 rounded-lg border bg-card p-1 text-xs">
+          <div className="flex items-center gap-1.5 rounded-lg border bg-card p-1 text-xs overflow-x-auto max-w-full">
             {['all', 'draft', 'sent', 'accepted', 'converted', 'expired', 'cancelled'].map((st) => (
               <button
                 key={st}

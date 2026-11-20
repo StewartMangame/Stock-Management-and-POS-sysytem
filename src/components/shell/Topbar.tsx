@@ -11,23 +11,46 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { LogOut, User, Settings } from 'lucide-react';
+import { LogOut, User, Settings, Menu } from 'lucide-react';
 import Link from 'next/link';
 import { initials } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 
-export function Topbar() {
+export function Topbar({ onOpenMobileMenu }: { onOpenMobileMenu?: () => void }) {
   const { data: session } = useSession();
   const userName = session?.user?.name ?? 'User';
   const userEmail = session?.user?.email ?? '';
 
   return (
-    <header className="flex h-14 w-full items-center justify-between border-b border-ace-band bg-white px-6">
-      {/* Left: page title slot (breadcrumb filled by pages) */}
-      <div id="topbar-breadcrumb" className="flex items-center gap-2 text-sm text-ace-muted" />
+    <header className="flex h-14 w-full items-center justify-between border-b border-ace-band bg-white px-3 sm:px-6">
+      {/* Left: Mobile hamburger menu trigger & breadcrumb slot */}
+      <div className="flex items-center gap-2 sm:gap-3">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={onOpenMobileMenu}
+          className="h-9 w-9 p-0 text-ace-navy hover:bg-ace-band md:hidden"
+          aria-label="Open navigation menu"
+        >
+          <Menu className="h-5 w-5" />
+        </Button>
+
+        {/* Small mobile branding */}
+        <div className="flex items-center gap-1.5 md:hidden">
+          <div className="flex h-6 w-6 items-center justify-center rounded bg-ace-navy text-[10px] font-bold text-white">
+            A
+          </div>
+          <span className="text-xs font-bold text-ace-navy-deep sm:inline hidden">ACE</span>
+        </div>
+
+        {/* Page title / breadcrumb slot (filled by pages) */}
+        <div id="topbar-breadcrumb" className="flex items-center gap-1.5 text-xs sm:text-sm text-ace-muted truncate" />
+      </div>
 
       {/* Right: user menu */}
-      <div className="flex items-center gap-3">
-        <span className="hidden text-sm text-ace-muted sm:block">{userEmail}</span>
+      <div className="flex items-center gap-2 sm:gap-3">
+        <span className="hidden text-xs sm:text-sm text-ace-muted md:inline">{userEmail}</span>
 
         <DropdownMenu>
           <DropdownMenuTrigger

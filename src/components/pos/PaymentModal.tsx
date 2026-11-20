@@ -373,20 +373,20 @@ export function PaymentModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && !loading && onClose()}>
-      <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto">
+      <DialogContent className="w-[calc(100vw-1.5rem)] sm:max-w-2xl max-h-[92dvh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <DialogTitle className="text-xl font-bold text-ace-navy">Tender Payment</DialogTitle>
+              <DialogTitle className="text-lg sm:text-xl font-bold text-ace-navy">Tender Payment</DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
                 Select tender method(s) and complete transaction
               </DialogDescription>
             </div>
-            <div className="text-right">
+            <div className="sm:text-right">
               <span className="text-[11px] font-semibold text-muted-foreground uppercase">
                 Grand Total
               </span>
-              <div className="text-2xl font-black text-ace-navy">{formatMwk(totalMinor)}</div>
+              <div className="text-xl sm:text-2xl font-black text-ace-navy">{formatMwk(totalMinor)}</div>
             </div>
           </div>
         </DialogHeader>
@@ -454,7 +454,7 @@ export function PaymentModal({
             <div className="rounded-lg border border-border p-4 space-y-3.5 bg-card">
               <Label className="text-xs font-semibold text-foreground">Select Tender Method</Label>
               {/* Method Switcher */}
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <button
                   type="button"
                   onClick={() => setCurrentMethod('cash')}

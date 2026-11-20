@@ -143,9 +143,11 @@ const NAV_GROUPS: NavItem[] = [
 function NavGroup({
   item,
   permissions,
+  onNavigate,
 }: {
   item: NavItem;
   permissions: string[];
+  onNavigate?: () => void;
 }) {
   const pathname = usePathname() ?? '';
 
@@ -165,8 +167,9 @@ function NavGroup({
     return (
       <Link
         href={item.href}
+        onClick={onNavigate}
         className={cn(
-          'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+          'flex min-h-[40px] items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
           active
             ? 'bg-ace-band text-ace-blue'
             : 'text-ace-muted hover:bg-ace-band hover:text-ace-blue',
@@ -186,7 +189,7 @@ function NavGroup({
       <button
         onClick={() => setOpen(!open)}
         className={cn(
-          'flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+          'flex min-h-[40px] w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
           isChildActive
             ? 'text-ace-blue'
             : 'text-ace-navy hover:bg-ace-band hover:text-ace-blue',
@@ -210,8 +213,9 @@ function NavGroup({
               <Link
                 key={child.href}
                 href={child.href}
+                onClick={onNavigate}
                 className={cn(
-                  'rounded-md px-2 py-1.5 text-xs font-medium transition-colors',
+                  'flex min-h-[36px] items-center rounded-md px-2 py-1.5 text-xs font-medium transition-colors',
                   active
                     ? 'bg-ace-band text-ace-blue'
                     : 'text-ace-muted hover:text-ace-blue hover:bg-ace-band',
@@ -228,16 +232,29 @@ function NavGroup({
   );
 }
 
-export function Sidebar({ permissions = [] }: { permissions?: string[] }) {
+export function Sidebar({
+  permissions = [],
+  onNavigate,
+  className,
+}: {
+  permissions?: string[];
+  onNavigate?: () => void;
+  className?: string;
+}) {
   // Filter top-level groups by permission
   const visibleGroups = NAV_GROUPS.filter(
     (item) => !item.permission || permissions.includes(item.permission),
   );
 
   return (
-    <aside className="flex h-full w-56 shrink-0 flex-col border-r border-gray-200 bg-white">
+    <aside
+      className={cn(
+        'flex h-full w-56 shrink-0 flex-col border-r border-gray-200 bg-white',
+        className,
+      )}
+    >
       {/* Logo area */}
-      <div className="flex h-14 items-center border-b border-ace-band px-4">
+      <div className="flex h-14 items-center justify-between border-b border-ace-band px-4">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded bg-ace-navy text-xs font-bold text-white">
             A
@@ -250,16 +267,21 @@ export function Sidebar({ permissions = [] }: { permissions?: string[] }) {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-2 py-3">
+      <nav className="flex-1 overflow-y-auto px-2 py-3" aria-label="Main Navigation">
         <div className="flex flex-col gap-0.5">
           {visibleGroups.map((item) => (
-            <NavGroup key={item.label} item={item} permissions={permissions} />
+            <NavGroup
+              key={item.label}
+              item={item}
+              permissions={permissions}
+              onNavigate={onNavigate}
+            />
           ))}
         </div>
       </nav>
 
       {/* Footer accent strip */}
-      <div className="flex h-1.5 w-full">
+      <div className="flex h-1.5 w-full shrink-0">
         <div className="flex-1 bg-ace-blue" />
         <div className="flex-1 bg-ace-sky" />
         <div className="flex-1 bg-ace-cyan" />

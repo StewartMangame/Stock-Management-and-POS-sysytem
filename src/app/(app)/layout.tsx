@@ -1,5 +1,4 @@
-import { Sidebar } from '@/components/shell/Sidebar';
-import { Topbar } from '@/components/shell/Topbar';
+import { AppShell } from '@/components/shell/AppShell';
 import { auth } from '@/auth';
 import { db } from '@/server/db';
 import { roles } from '@/server/db/schema';
@@ -38,16 +37,5 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     console.error('Failed to load user permissions for sidebar:', err);
   }
 
-  return (
-    <div className="flex h-screen w-full overflow-hidden bg-ace-bg">
-      {/* Sidebar receives the role's permission strings for nav filtering */}
-      <Sidebar permissions={permissions} />
-
-      {/* Main area */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar />
-        <main className="flex-1 overflow-y-auto p-6 animate-fade-in">{children}</main>
-      </div>
-    </div>
-  );
+  return <AppShell permissions={permissions}>{children}</AppShell>;
 }

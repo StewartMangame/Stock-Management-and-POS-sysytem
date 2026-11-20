@@ -3,10 +3,15 @@ import { cn } from '@/lib/utils';
 
 const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
   ({ className, ...props }, ref) => (
-    <div className="relative w-full overflow-auto rounded-md border border-gray-200">
+    <div
+      className="relative w-full overflow-x-auto rounded-md border border-gray-200 focus:outline-none focus:ring-1 focus:ring-ace-sky"
+      tabIndex={0}
+      role="region"
+      aria-label="Scrollable data table"
+    >
       <table
         ref={ref}
-        className={cn('w-full caption-bottom text-sm ace-table', className)}
+        className={cn('w-full caption-bottom text-sm ace-table min-w-[640px] sm:min-w-full', className)}
         {...props}
       />
     </div>

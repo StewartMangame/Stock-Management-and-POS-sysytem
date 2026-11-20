@@ -80,6 +80,7 @@
   body {
     @apply bg-ace-bg text-ace-text;
     min-height: 100vh;
+    min-height: 100dvh;
   }
 
   /* Typography scale */
