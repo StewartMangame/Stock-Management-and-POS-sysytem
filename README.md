@@ -237,5 +237,4 @@ pg_dump "$MIGRATION_DATABASE_URL" \
 
 ## Logo
 
-Place the Ace Holdings logo at `/public/brand/ace-logo.png`.
-Until it is supplied, the sidebar and login page show a navy "A" placeholder.
+The official Ace Holdings logo is placed at `/public/brand/ace-logo.png` and active across the application (Login page, Sidebar, Mobile topbar, Quotation views, and PDF documents).

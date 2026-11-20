@@ -5,6 +5,7 @@
  * Handles phone input, network detection, initiation, and status polling.
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
+import Image from 'next/image';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -152,9 +153,22 @@ export function PaymentClient({ token, linkData }: Props) {
     <div className="max-w-md w-full bg-background rounded-xl shadow-lg overflow-hidden">
       {/* Header */}
       <div className="bg-primary px-6 py-5 text-primary-foreground">
-        <p className="text-sm font-medium opacity-80">Invoice Payment</p>
-        <p className="text-2xl font-bold font-mono mt-1">{invoice.documentNumber}</p>
-        <p className="text-sm opacity-75 mt-0.5">{invoice.customerName}</p>
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium opacity-80">Invoice Payment</p>
+            <p className="text-2xl font-bold font-mono mt-1">{invoice.documentNumber}</p>
+            <p className="text-sm opacity-75 mt-0.5">{invoice.customerName}</p>
+          </div>
+          <div className="relative h-12 w-20 shrink-0 bg-white/10 rounded-lg p-1.5 flex items-center justify-center">
+            <Image
+              src="/brand/ace-logo.png"
+              alt="Ace Holdings Logo"
+              width={70}
+              height={40}
+              className="h-9 w-auto object-contain"
+            />
+          </div>
+        </div>
       </div>
 
       {/* Invoice Summary */}

@@ -1,6 +1,7 @@
 'use client';
 
 import { signOut } from 'next-auth/react';
+import Image from 'next/image';
 import { useSession } from 'next-auth/react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
@@ -38,8 +39,15 @@ export function Topbar({ onOpenMobileMenu }: { onOpenMobileMenu?: () => void }) 
 
         {/* Small mobile branding */}
         <div className="flex items-center gap-1.5 md:hidden">
-          <div className="flex h-6 w-6 items-center justify-center rounded bg-ace-navy text-[10px] font-bold text-white">
-            A
+          <div className="relative flex h-6 w-6 shrink-0 items-center justify-center">
+            <Image
+              src="/brand/ace-logo.png"
+              alt="Ace Holdings Logo"
+              width={24}
+              height={24}
+              className="h-6 w-auto max-w-[24px] object-contain"
+              priority
+            />
           </div>
           <span className="text-xs font-bold text-ace-navy-deep sm:inline hidden">ACE</span>
         </div>

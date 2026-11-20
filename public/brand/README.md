@@ -1,3 +1,3 @@
-# Logo placeholder
-# Place ace-logo.png here when the file is supplied.
-# Referenced in components as /brand/ace-logo.png
+# Official Brand Assets
+`ace-logo.png` is the official company logo (transparent background, 321x192).
+Referenced across the UI as `/brand/ace-logo.png`.

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import {
@@ -255,9 +256,16 @@ export function Sidebar({
     >
       {/* Logo area */}
       <div className="flex h-14 items-center justify-between border-b border-ace-band px-4">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded bg-ace-navy text-xs font-bold text-white">
-            A
+        <div className="flex items-center gap-2.5">
+          <div className="relative flex h-8 w-8 shrink-0 items-center justify-center">
+            <Image
+              src="/brand/ace-logo.png"
+              alt="Ace Holdings Logo"
+              width={32}
+              height={32}
+              className="h-8 w-auto max-w-[32px] object-contain"
+              priority
+            />
           </div>
           <div className="leading-tight">
             <p className="text-xs font-bold text-ace-navy-deep">ACE HOLDINGS</p>

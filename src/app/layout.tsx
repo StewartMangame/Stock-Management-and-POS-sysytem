@@ -25,6 +25,10 @@ export const metadata: Metadata = {
   },
   description:
     'Stock management, sales and point-of-sale system for Ace Holdings Limited, Blantyre, Malawi.',
+  icons: {
+    icon: '/brand/ace-logo.png',
+    apple: '/brand/ace-logo.png',
+  },
   robots: { index: false, follow: false }, // internal system — no public indexing
 };
 
@@ -32,8 +36,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const showStagingBanner = isStaging();
 
   return (
-    <html lang="en" className={inter.variable}>
-      <body>
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
+      <body suppressHydrationWarning>
         {showStagingBanner && (
           <div
             id="staging-banner"
