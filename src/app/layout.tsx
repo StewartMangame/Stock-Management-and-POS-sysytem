@@ -36,8 +36,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const showStagingBanner = isStaging();
 
   return (
-    <html lang="en" className={inter.variable}>
-      <body>
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
+      <body suppressHydrationWarning>
         {showStagingBanner && (
           <div
             id="staging-banner"
